@@ -15,7 +15,7 @@ GoHighLevel automation toolkit - Python API client and Claude Code integration.
 
 ```bash
 # Clone and install
-git clone https://github.com/Hermetian/GHLAssistant.git
+git clone https://github.com/discordwell/GHLAssistant.git
 cd GHLAssistant
 
 # Create virtual environment (Python 3.10+ required)

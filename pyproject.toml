@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [
-    { name = "Hermetian" }
+    { name = "discordwell" }
 ]
 keywords = ["gohighlevel", "ghl", "crm", "automation", "cli"]
 classifiers = [
@@ -42,8 +42,8 @@ dev = [
 ghl = "ghl_assistant.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/Hermetian/GHLAssistant"
-Repository = "https://github.com/Hermetian/GHLAssistant"
+Homepage = "https://github.com/discordwell/GHLAssistant"
+Repository = "https://github.com/discordwell/GHLAssistant"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ghl_assistant"]
