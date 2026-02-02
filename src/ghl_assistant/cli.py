@@ -1,5 +1,9 @@
 """GHL Assistant CLI - Main entry point."""
 
+import asyncio
+import json
+from typing import Any
+
 import typer
 from rich.console import Console
 from rich.panel import Panel
@@ -17,11 +21,34 @@ auth_app = typer.Typer(help="Authentication commands")
 tdlc_app = typer.Typer(help="10DLC registration commands")
 templates_app = typer.Typer(help="Workflow template commands")
 browser_app = typer.Typer(help="Browser automation and traffic capture")
+contacts_app = typer.Typer(help="Contact management")
+workflows_app = typer.Typer(help="Workflow management")
+conversations_app = typer.Typer(help="Conversations and messaging")
+calendars_app = typer.Typer(help="Calendar and appointment management")
+opportunities_app = typer.Typer(help="Pipeline and opportunity management")
+forms_app = typer.Typer(help="Forms and submissions")
+account_app = typer.Typer(help="Account and location info")
 
 app.add_typer(auth_app, name="auth")
 app.add_typer(tdlc_app, name="10dlc")
 app.add_typer(templates_app, name="templates")
 app.add_typer(browser_app, name="browser")
+app.add_typer(contacts_app, name="contacts")
+app.add_typer(workflows_app, name="workflows")
+app.add_typer(conversations_app, name="conversations")
+app.add_typer(calendars_app, name="calendars")
+app.add_typer(opportunities_app, name="opportunities")
+app.add_typer(forms_app, name="forms")
+app.add_typer(account_app, name="account")
+
+
+def _output_result(result: dict[str, Any], json_output: bool = False) -> None:
+    """Output result as JSON or formatted."""
+    if json_output:
+        console.print_json(json.dumps(result, default=str))
+    else:
+        # Default to JSON for complex results
+        console.print_json(json.dumps(result, default=str, indent=2))
 
 
 # ============================================================================
@@ -363,6 +390,605 @@ def browser_token(
 
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
+
+
+# ============================================================================
+# Contacts Commands
+# ============================================================================
+
+
+@contacts_app.command("list")
+def contacts_list(
+    limit: int = typer.Option(20, "--limit", "-l", help="Max contacts to return"),
+    query: str = typer.Option(None, "--query", "-q", help="Search query"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """List contacts for the current location."""
+    from .api import GHLClient
+
+    async def _list():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.contacts.list(limit=limit, query=query)
+
+    result = asyncio.run(_list())
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        contacts = result.get("contacts", [])
+        table = Table(title=f"Contacts ({len(contacts)})")
+        table.add_column("ID", style="dim", max_width=24)
+        table.add_column("Name", style="cyan")
+        table.add_column("Email", style="white")
+        table.add_column("Phone", style="green")
+        table.add_column("Tags", style="yellow")
+
+        for c in contacts:
+            name = f"{c.get('firstName', '')} {c.get('lastName', '')}".strip() or "-"
+            tags = ", ".join(c.get("tags", [])[:3])
+            if len(c.get("tags", [])) > 3:
+                tags += "..."
+            table.add_row(
+                c.get("id", c.get("_id", ""))[:24],
+                name,
+                c.get("email", "-"),
+                c.get("phone", "-"),
+                tags or "-",
+            )
+
+        console.print(table)
+
+
+@contacts_app.command("get")
+def contacts_get(
+    contact_id: str = typer.Argument(..., help="Contact ID"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Get a single contact by ID."""
+    from .api import GHLClient
+
+    async def _get():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.contacts.get(contact_id)
+
+    result = asyncio.run(_get())
+    _output_result(result, json_output)
+
+
+@contacts_app.command("create")
+def contacts_create(
+    first_name: str = typer.Option(None, "--first-name", "-f", help="First name"),
+    last_name: str = typer.Option(None, "--last-name", "-l", help="Last name"),
+    email: str = typer.Option(None, "--email", "-e", help="Email address"),
+    phone: str = typer.Option(None, "--phone", "-p", help="Phone number (E.164)"),
+    tags: str = typer.Option(None, "--tags", "-t", help="Comma-separated tags"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Create a new contact."""
+    from .api import GHLClient
+
+    tag_list = [t.strip() for t in tags.split(",")] if tags else None
+
+    async def _create():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.contacts.create(
+                first_name=first_name,
+                last_name=last_name,
+                email=email,
+                phone=phone,
+                tags=tag_list,
+            )
+
+    result = asyncio.run(_create())
+    _output_result(result, json_output)
+    console.print("[green]Contact created successfully![/green]")
+
+
+@contacts_app.command("search")
+def contacts_search(
+    query: str = typer.Argument(..., help="Search query (name, email, phone)"),
+    limit: int = typer.Option(20, "--limit", "-l", help="Max results"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Search contacts by name, email, or phone."""
+    from .api import GHLClient
+
+    async def _search():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.contacts.search(query=query, limit=limit)
+
+    result = asyncio.run(_search())
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        contacts = result.get("contacts", [])
+        console.print(f"[dim]Found {len(contacts)} contacts matching '{query}'[/dim]\n")
+        for c in contacts:
+            name = f"{c.get('firstName', '')} {c.get('lastName', '')}".strip() or "No name"
+            console.print(f"  [cyan]{name}[/cyan] ({c.get('email', 'no email')})")
+
+
+# ============================================================================
+# Workflows Commands
+# ============================================================================
+
+
+@workflows_app.command("list")
+def workflows_list(
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """List all workflows for the current location."""
+    from .api import GHLClient
+
+    async def _list():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.workflows.list()
+
+    result = asyncio.run(_list())
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        workflows = result.get("workflows", [])
+        table = Table(title=f"Workflows ({len(workflows)})")
+        table.add_column("ID", style="dim", max_width=24)
+        table.add_column("Name", style="cyan")
+        table.add_column("Status", style="green")
+
+        for w in workflows:
+            status = w.get("status", "unknown")
+            status_style = "green" if status == "published" else "yellow"
+            table.add_row(
+                w.get("id", w.get("_id", ""))[:24],
+                w.get("name", "-"),
+                f"[{status_style}]{status}[/{status_style}]",
+            )
+
+        console.print(table)
+
+
+@workflows_app.command("add-contact")
+def workflows_add_contact(
+    workflow_id: str = typer.Argument(..., help="Workflow ID"),
+    contact_id: str = typer.Argument(..., help="Contact ID"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Add a contact to a workflow."""
+    from .api import GHLClient
+
+    async def _add():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.workflows.add_contact(workflow_id, contact_id)
+
+    result = asyncio.run(_add())
+    _output_result(result, json_output)
+    console.print("[green]Contact added to workflow![/green]")
+
+
+# ============================================================================
+# Conversations Commands
+# ============================================================================
+
+
+@conversations_app.command("list")
+def conversations_list(
+    limit: int = typer.Option(20, "--limit", "-l", help="Max conversations"),
+    unread: bool = typer.Option(False, "--unread", "-u", help="Only unread"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """List conversations for the current location."""
+    from .api import GHLClient
+
+    async def _list():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.conversations.list(limit=limit, unread_only=unread)
+
+    result = asyncio.run(_list())
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        conversations = result.get("conversations", [])
+        table = Table(title=f"Conversations ({len(conversations)})")
+        table.add_column("ID", style="dim", max_width=24)
+        table.add_column("Contact", style="cyan")
+        table.add_column("Type", style="yellow")
+        table.add_column("Unread", style="red")
+
+        for c in conversations:
+            table.add_row(
+                c.get("id", c.get("_id", ""))[:24],
+                c.get("contactName", c.get("contactId", "-")),
+                c.get("type", "-"),
+                str(c.get("unreadCount", 0)),
+            )
+
+        console.print(table)
+
+
+@conversations_app.command("send-sms")
+def conversations_send_sms(
+    contact_id: str = typer.Argument(..., help="Contact ID"),
+    message: str = typer.Argument(..., help="SMS message text"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Send an SMS message to a contact."""
+    from .api import GHLClient
+
+    async def _send():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.conversations.send_sms(contact_id, message)
+
+    result = asyncio.run(_send())
+    _output_result(result, json_output)
+    console.print("[green]SMS sent![/green]")
+
+
+@conversations_app.command("send-email")
+def conversations_send_email(
+    contact_id: str = typer.Argument(..., help="Contact ID"),
+    subject: str = typer.Argument(..., help="Email subject"),
+    body: str = typer.Argument(..., help="Email body (HTML supported)"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Send an email to a contact."""
+    from .api import GHLClient
+
+    async def _send():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.conversations.send_email(contact_id, subject, body)
+
+    result = asyncio.run(_send())
+    _output_result(result, json_output)
+    console.print("[green]Email sent![/green]")
+
+
+# ============================================================================
+# Calendars Commands
+# ============================================================================
+
+
+@calendars_app.command("list")
+def calendars_list(
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """List all calendars for the current location."""
+    from .api import GHLClient
+
+    async def _list():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.calendars.list()
+
+    result = asyncio.run(_list())
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        calendars = result.get("calendars", [])
+        table = Table(title=f"Calendars ({len(calendars)})")
+        table.add_column("ID", style="dim", max_width=24)
+        table.add_column("Name", style="cyan")
+        table.add_column("Event Type", style="yellow")
+
+        for c in calendars:
+            table.add_row(
+                c.get("id", c.get("_id", ""))[:24],
+                c.get("name", "-"),
+                c.get("eventType", "-"),
+            )
+
+        console.print(table)
+
+
+@calendars_app.command("slots")
+def calendars_slots(
+    calendar_id: str = typer.Argument(..., help="Calendar ID"),
+    date: str = typer.Argument(..., help="Date (YYYY-MM-DD)"),
+    end_date: str = typer.Option(None, "--end", "-e", help="End date"),
+    timezone: str = typer.Option("America/New_York", "--tz", help="Timezone"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Get available slots for a calendar."""
+    from .api import GHLClient
+
+    async def _slots():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.calendars.get_slots(
+                calendar_id, date, end_date=end_date, timezone=timezone
+            )
+
+    result = asyncio.run(_slots())
+    _output_result(result, json_output)
+
+
+@calendars_app.command("book")
+def calendars_book(
+    calendar_id: str = typer.Argument(..., help="Calendar ID"),
+    contact_id: str = typer.Argument(..., help="Contact ID"),
+    slot_time: str = typer.Argument(..., help="Slot time (ISO format)"),
+    title: str = typer.Option(None, "--title", "-t", help="Appointment title"),
+    notes: str = typer.Option(None, "--notes", "-n", help="Appointment notes"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Book an appointment."""
+    from .api import GHLClient
+
+    async def _book():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.calendars.book(
+                calendar_id, contact_id, slot_time, title=title, notes=notes
+            )
+
+    result = asyncio.run(_book())
+    _output_result(result, json_output)
+    console.print("[green]Appointment booked![/green]")
+
+
+# ============================================================================
+# Opportunities Commands
+# ============================================================================
+
+
+@opportunities_app.command("pipelines")
+def opportunities_pipelines(
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """List all pipelines for the current location."""
+    from .api import GHLClient
+
+    async def _list():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.opportunities.pipelines()
+
+    result = asyncio.run(_list())
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        pipelines = result.get("pipelines", [])
+        table = Table(title=f"Pipelines ({len(pipelines)})")
+        table.add_column("ID", style="dim", max_width=24)
+        table.add_column("Name", style="cyan")
+        table.add_column("Stages", style="yellow")
+
+        for p in pipelines:
+            stages = [s.get("name", "") for s in p.get("stages", [])]
+            table.add_row(
+                p.get("id", p.get("_id", ""))[:24],
+                p.get("name", "-"),
+                " → ".join(stages[:4]) + ("..." if len(stages) > 4 else ""),
+            )
+
+        console.print(table)
+
+
+@opportunities_app.command("list")
+def opportunities_list(
+    pipeline_id: str = typer.Option(None, "--pipeline", "-p", help="Filter by pipeline"),
+    limit: int = typer.Option(20, "--limit", "-l", help="Max results"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """List opportunities."""
+    from .api import GHLClient
+
+    async def _list():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.opportunities.list(pipeline_id=pipeline_id, limit=limit)
+
+    result = asyncio.run(_list())
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        opps = result.get("opportunities", [])
+        table = Table(title=f"Opportunities ({len(opps)})")
+        table.add_column("ID", style="dim", max_width=24)
+        table.add_column("Name", style="cyan")
+        table.add_column("Value", style="green")
+        table.add_column("Status", style="yellow")
+
+        for o in opps:
+            value = o.get("monetaryValue")
+            value_str = f"${value:,.2f}" if value else "-"
+            table.add_row(
+                o.get("id", o.get("_id", ""))[:24],
+                o.get("name", "-"),
+                value_str,
+                o.get("status", "-"),
+            )
+
+        console.print(table)
+
+
+@opportunities_app.command("create")
+def opportunities_create(
+    pipeline_id: str = typer.Argument(..., help="Pipeline ID"),
+    stage_id: str = typer.Argument(..., help="Initial stage ID"),
+    contact_id: str = typer.Argument(..., help="Contact ID"),
+    name: str = typer.Argument(..., help="Opportunity name"),
+    value: float = typer.Option(None, "--value", "-v", help="Monetary value"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Create a new opportunity."""
+    from .api import GHLClient
+
+    async def _create():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.opportunities.create(
+                pipeline_id=pipeline_id,
+                stage_id=stage_id,
+                contact_id=contact_id,
+                name=name,
+                value=value,
+            )
+
+    result = asyncio.run(_create())
+    _output_result(result, json_output)
+    console.print("[green]Opportunity created![/green]")
+
+
+@opportunities_app.command("move")
+def opportunities_move(
+    opportunity_id: str = typer.Argument(..., help="Opportunity ID"),
+    stage_id: str = typer.Argument(..., help="Target stage ID"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Move an opportunity to a new stage."""
+    from .api import GHLClient
+
+    async def _move():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.opportunities.move_stage(opportunity_id, stage_id)
+
+    result = asyncio.run(_move())
+    _output_result(result, json_output)
+    console.print("[green]Opportunity moved![/green]")
+
+
+# ============================================================================
+# Forms Commands
+# ============================================================================
+
+
+@forms_app.command("list")
+def forms_list(
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """List all forms for the current location."""
+    from .api import GHLClient
+
+    async def _list():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.forms.list()
+
+    result = asyncio.run(_list())
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        forms = result.get("forms", [])
+        table = Table(title=f"Forms ({len(forms)})")
+        table.add_column("ID", style="dim", max_width=24)
+        table.add_column("Name", style="cyan")
+
+        for f in forms:
+            table.add_row(
+                f.get("id", f.get("_id", ""))[:24],
+                f.get("name", "-"),
+            )
+
+        console.print(table)
+
+
+@forms_app.command("submissions")
+def forms_submissions(
+    form_id: str = typer.Argument(..., help="Form ID"),
+    limit: int = typer.Option(50, "--limit", "-l", help="Max submissions"),
+    page: int = typer.Option(1, "--page", "-p", help="Page number"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Get form submissions."""
+    from .api import GHLClient
+
+    async def _subs():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.forms.submissions(form_id, limit=limit, page=page)
+
+    result = asyncio.run(_subs())
+    _output_result(result, json_output)
+
+
+# ============================================================================
+# Account Commands
+# ============================================================================
+
+
+@account_app.command("info")
+def account_info(
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Show current account and session info."""
+    from .api import GHLClient
+
+    async def _info():
+        async with GHLClient.from_session() as ghl:
+            info = {
+                "config": ghl.config.to_dict(),
+            }
+            if ghl.config.user_id:
+                try:
+                    info["user"] = await ghl.get_user()
+                except Exception:
+                    pass
+            if ghl.config.company_id:
+                try:
+                    info["company"] = await ghl.get_company()
+                except Exception:
+                    pass
+            return info
+
+    result = asyncio.run(_info())
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        config = result.get("config", {})
+        console.print(
+            Panel(
+                f"[bold]Session Info[/bold]\n\n"
+                f"User ID: {config.get('user_id', 'N/A')}\n"
+                f"Company ID: {config.get('company_id', 'N/A')}\n"
+                f"Location ID: {config.get('location_id', 'N/A')}\n"
+                f"Token: {config.get('token', 'N/A')}",
+                title="GHL Account",
+            )
+        )
+
+        user = result.get("user", {})
+        if user:
+            console.print(
+                f"\n[cyan]User:[/cyan] {user.get('firstName', '')} {user.get('lastName', '')} "
+                f"({user.get('email', '')})"
+            )
+
+        company = result.get("company", {})
+        if company:
+            console.print(f"[cyan]Company:[/cyan] {company.get('name', 'N/A')}")
+
+
+@account_app.command("locations")
+def account_locations(
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """List locations for the current company."""
+    from .api import GHLClient
+
+    async def _locations():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.search_locations()
+
+    result = asyncio.run(_locations())
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        locations = result.get("locations", [])
+        table = Table(title=f"Locations ({len(locations)})")
+        table.add_column("ID", style="dim", max_width=24)
+        table.add_column("Name", style="cyan")
+        table.add_column("Phone", style="green")
+        table.add_column("Email", style="white")
+
+        for loc in locations:
+            table.add_row(
+                loc.get("_id", loc.get("id", ""))[:24],
+                loc.get("name", "-"),
+                loc.get("phone", "-"),
+                loc.get("email", "-"),
+            )
+
+        console.print(table)
 
 
 # ============================================================================

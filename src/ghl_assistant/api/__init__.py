@@ -24,6 +24,12 @@ from .calendars import CalendarsAPI
 from .forms import FormsAPI
 from .opportunities import OpportunitiesAPI
 from .conversations import ConversationsAPI
+from .tags import TagsAPI
+from .custom_fields import CustomFieldsAPI
+from .custom_values import CustomValuesAPI
+from .campaigns import CampaignsAPI
+from .surveys import SurveysAPI
+from .funnels import FunnelsAPI
 
 __all__ = [
     "GHLClient",
@@ -34,4 +40,10 @@ __all__ = [
     "FormsAPI",
     "OpportunitiesAPI",
     "ConversationsAPI",
+    "TagsAPI",
+    "CustomFieldsAPI",
+    "CustomValuesAPI",
+    "CampaignsAPI",
+    "SurveysAPI",
+    "FunnelsAPI",
 ]

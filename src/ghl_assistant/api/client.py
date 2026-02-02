@@ -20,6 +20,12 @@ if TYPE_CHECKING:
     from .forms import FormsAPI
     from .opportunities import OpportunitiesAPI
     from .conversations import ConversationsAPI
+    from .tags import TagsAPI
+    from .custom_fields import CustomFieldsAPI
+    from .custom_values import CustomValuesAPI
+    from .campaigns import CampaignsAPI
+    from .surveys import SurveysAPI
+    from .funnels import FunnelsAPI
 
 
 @dataclass
@@ -125,6 +131,12 @@ class GHLClient:
         self._forms: FormsAPI | None = None
         self._opportunities: OpportunitiesAPI | None = None
         self._conversations: ConversationsAPI | None = None
+        self._tags: TagsAPI | None = None
+        self._custom_fields: CustomFieldsAPI | None = None
+        self._custom_values: CustomValuesAPI | None = None
+        self._campaigns: CampaignsAPI | None = None
+        self._surveys: SurveysAPI | None = None
+        self._funnels: FunnelsAPI | None = None
 
     @classmethod
     def from_session(cls, filepath: str | Path | None = None) -> "GHLClient":
@@ -151,6 +163,12 @@ class GHLClient:
         from .forms import FormsAPI
         from .opportunities import OpportunitiesAPI
         from .conversations import ConversationsAPI
+        from .tags import TagsAPI
+        from .custom_fields import CustomFieldsAPI
+        from .custom_values import CustomValuesAPI
+        from .campaigns import CampaignsAPI
+        from .surveys import SurveysAPI
+        from .funnels import FunnelsAPI
 
         self._contacts = ContactsAPI(self)
         self._workflows = WorkflowsAPI(self)
@@ -158,6 +176,12 @@ class GHLClient:
         self._forms = FormsAPI(self)
         self._opportunities = OpportunitiesAPI(self)
         self._conversations = ConversationsAPI(self)
+        self._tags = TagsAPI(self)
+        self._custom_fields = CustomFieldsAPI(self)
+        self._custom_values = CustomValuesAPI(self)
+        self._campaigns = CampaignsAPI(self)
+        self._surveys = SurveysAPI(self)
+        self._funnels = FunnelsAPI(self)
 
         # Auto-detect location if not set
         if not self.config.location_id and self.config.company_id:
@@ -216,6 +240,48 @@ class GHLClient:
         if not self._conversations:
             raise RuntimeError("Client not initialized. Use 'async with' context.")
         return self._conversations
+
+    @property
+    def tags(self) -> "TagsAPI":
+        """Tags API."""
+        if not self._tags:
+            raise RuntimeError("Client not initialized. Use 'async with' context.")
+        return self._tags
+
+    @property
+    def custom_fields(self) -> "CustomFieldsAPI":
+        """Custom Fields API."""
+        if not self._custom_fields:
+            raise RuntimeError("Client not initialized. Use 'async with' context.")
+        return self._custom_fields
+
+    @property
+    def custom_values(self) -> "CustomValuesAPI":
+        """Custom Values API."""
+        if not self._custom_values:
+            raise RuntimeError("Client not initialized. Use 'async with' context.")
+        return self._custom_values
+
+    @property
+    def campaigns(self) -> "CampaignsAPI":
+        """Campaigns API."""
+        if not self._campaigns:
+            raise RuntimeError("Client not initialized. Use 'async with' context.")
+        return self._campaigns
+
+    @property
+    def surveys(self) -> "SurveysAPI":
+        """Surveys API."""
+        if not self._surveys:
+            raise RuntimeError("Client not initialized. Use 'async with' context.")
+        return self._surveys
+
+    @property
+    def funnels(self) -> "FunnelsAPI":
+        """Funnels API."""
+        if not self._funnels:
+            raise RuntimeError("Client not initialized. Use 'async with' context.")
+        return self._funnels
 
     # HTTP methods
     async def _get(self, endpoint: str, **params) -> dict[str, Any]:
