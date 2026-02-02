@@ -153,15 +153,26 @@ class GHLBrowserTasks:
                 command=self.agent.find_elements("profile menu or settings dropdown"),
             ),
             TaskStep(
+                name="click_profile_menu",
+                description="Click profile menu",
+                command=self.agent.press_key("Enter"),
+                wait_after=0.5,
+            ),
+            TaskStep(
                 name="find_logout",
                 description="Find logout option",
                 command=self.agent.find_elements("logout button or sign out"),
             ),
             TaskStep(
+                name="click_logout",
+                description="Click logout",
+                command=self.agent.press_key("Enter"),
+                wait_after=2.0,
+            ),
+            TaskStep(
                 name="confirm_logout",
                 description="Verify logged out",
                 command=self.agent.screenshot(),
-                wait_after=2.0,
             ),
         ]
 

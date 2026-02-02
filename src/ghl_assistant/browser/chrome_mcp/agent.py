@@ -439,6 +439,6 @@ def create_agent_from_context(tab_context: dict[str, Any]) -> ChromeMCPAgent | N
         ChromeMCPAgent if valid tab exists, None otherwise
     """
     tabs = tab_context.get("tabs", [])
-    if tabs:
-        return ChromeMCPAgent(tabs[0].get("id"))
+    if tabs and tabs[0].get("id"):
+        return ChromeMCPAgent(tabs[0]["id"])
     return None

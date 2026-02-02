@@ -355,7 +355,6 @@ def browser_token(
                 return {"success": False, "error": "Not logged in. Run 'ghl browser capture' first."}
 
             # Wait a moment for API calls
-            import asyncio
             await asyncio.sleep(3)
 
             # Extract tokens

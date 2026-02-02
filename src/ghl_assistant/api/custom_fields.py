@@ -129,6 +129,9 @@ class CustomFieldsAPI:
         if position is not None:
             data["position"] = position
 
+        if not data:
+            raise ValueError("At least one field must be provided for update")
+
         return await self._client._put(f"/locations/{lid}/customFields/{field_id}", data)
 
     async def delete(self, field_id: str, location_id: str | None = None) -> dict[str, Any]:
