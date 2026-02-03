@@ -991,6 +991,216 @@ def account_locations(
 
 
 # ============================================================================
+# Blueprint Commands (snapshot / provision / audit / bulk)
+# ============================================================================
+
+bulk_app = typer.Typer(help="Cross-location bulk operations")
+app.add_typer(bulk_app, name="bulk")
+
+
+@app.command()
+def snapshot(
+    output: str = typer.Option("blueprint.yaml", "--output", "-o", help="Output YAML file path"),
+    name: str = typer.Option("Location Blueprint", "--name", "-n", help="Blueprint name"),
+    location_id: str = typer.Option(None, "--location", "-l", help="Location ID (default: session)"),
+):
+    """Snapshot a location's config to a YAML blueprint."""
+    from .api import GHLClient
+    from .blueprint.serialization import save_blueprint
+
+    async def _snapshot():
+        async with GHLClient.from_session() as ghl:
+            from .blueprint.engine import snapshot_location
+            result = await snapshot_location(ghl, name=name, location_id=location_id)
+            return result
+
+    with console.status("[bold cyan]Snapshotting location...[/bold cyan]"):
+        result = asyncio.run(_snapshot())
+
+    # Show warnings for failed API calls
+    if result.warnings:
+        for warn in result.warnings:
+            console.print(f"[yellow]Warning: {warn}[/yellow]")
+
+    filepath = save_blueprint(result.blueprint, output)
+    bp = result.blueprint
+
+    # Summary
+    sections = bp.resource_sections()
+    total = sum(len(v) for v in sections.values())
+
+    console.print(
+        Panel(
+            f"[bold green]Blueprint saved![/bold green]\n\n"
+            f"File: {filepath}\n"
+            f"Name: {bp.metadata.name}\n"
+            f"Source: {bp.metadata.source_location_id}\n"
+            f"Resources: {total} total\n\n"
+            + "\n".join(
+                f"  {k}: {len(v)}" for k, v in sections.items() if v
+            ),
+            title="Snapshot Complete",
+        )
+    )
+
+
+@app.command()
+def provision(
+    blueprint_file: str = typer.Argument(..., help="Path to blueprint YAML file"),
+    location_id: str = typer.Option(None, "--location", "-l", help="Target location ID"),
+    dry_run: bool = typer.Option(True, "--dry-run/--apply", help="Dry-run (default) or apply changes"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+):
+    """Apply a blueprint to a location. Dry-run by default."""
+    from .api import GHLClient
+    from .blueprint.serialization import load_blueprint
+    from .blueprint.diff import render_plan
+
+    bp = load_blueprint(blueprint_file)
+
+    # Always compute plan first (dry-run)
+    async def _plan():
+        async with GHLClient.from_session() as ghl:
+            from .blueprint.engine import provision_location
+            return await provision_location(ghl, bp, location_id=location_id, dry_run=True)
+
+    with console.status("[bold cyan]Computing plan...[/bold cyan]"):
+        plan = asyncio.run(_plan())
+
+    render_plan(plan, console)
+
+    if dry_run:
+        console.print("[dim]This is a dry run. Use --apply to execute changes.[/dim]")
+        return
+
+    # Apply mode: confirm before executing
+    changes = plan.created + plan.updated
+    if changes == 0:
+        console.print("[green]Nothing to apply. Location matches blueprint.[/green]")
+        return
+
+    if not yes:
+        confirm = typer.confirm(
+            f"Apply {changes} change(s) to the location?",
+            default=False,
+        )
+        if not confirm:
+            console.print("[yellow]Aborted.[/yellow]")
+            raise typer.Exit(0)
+
+    async def _apply():
+        async with GHLClient.from_session() as ghl:
+            from .blueprint.engine import provision_location
+            return await provision_location(ghl, bp, location_id=location_id, dry_run=False)
+
+    with console.status("[bold cyan]Applying changes...[/bold cyan]"):
+        result = asyncio.run(_apply())
+
+    if result.errors:
+        console.print(f"\n[red]{len(result.errors)} errors occurred:[/red]")
+        for err in result.errors:
+            console.print(f"  [red]- {err}[/red]")
+    else:
+        console.print("[green]Provision completed successfully![/green]")
+
+
+@app.command()
+def audit(
+    blueprint_file: str = typer.Argument(..., help="Path to blueprint YAML file"),
+    location_id: str = typer.Option(None, "--location", "-l", help="Location ID to audit"),
+    health: bool = typer.Option(True, "--health/--no-health", help="Run health checks"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Audit a location against a blueprint + run health checks."""
+    from .api import GHLClient
+    from .blueprint.serialization import load_blueprint
+
+    bp = load_blueprint(blueprint_file)
+
+    async def _audit():
+        async with GHLClient.from_session() as ghl:
+            from .blueprint.engine import audit_location
+            return await audit_location(ghl, bp, location_id=location_id, run_health=health)
+
+    with console.status("[bold cyan]Auditing location...[/bold cyan]"):
+        result = asyncio.run(_audit())
+
+    if json_output:
+        audit_data = {
+            "compliance_score": result.compliance_score,
+            "total_resources": result.total_resources,
+            "matched_resources": result.matched_resources,
+            "actions": [
+                {
+                    "resource_type": a.resource_type,
+                    "name": a.name,
+                    "action": a.action,
+                    "details": a.details,
+                }
+                for a in result.plan.actions
+            ],
+            "health": result.health,
+        }
+        _output_result(audit_data, json_output=True)
+    else:
+        from .blueprint.diff import render_audit
+        render_audit(
+            result.plan,
+            health=result.health,
+            compliance_score=result.compliance_score,
+            console=console,
+        )
+
+
+@bulk_app.command("snapshot")
+def bulk_snapshot_cmd(
+    output_dir: str = typer.Option("./blueprints", "-o", help="Output directory for YAML files"),
+):
+    """Snapshot all locations in the company to YAML blueprints."""
+    from .api import GHLClient
+
+    async def _bulk_snapshot():
+        async with GHLClient.from_session() as ghl:
+            from .blueprint.engine import bulk_snapshot
+            return await bulk_snapshot(ghl, output_dir=output_dir)
+
+    with console.status("[bold cyan]Snapshotting all locations...[/bold cyan]"):
+        results = asyncio.run(_bulk_snapshot())
+
+    table = Table(title=f"Bulk Snapshot ({len(results)} locations)")
+    table.add_column("Location", style="cyan")
+    table.add_column("File", style="white")
+
+    for loc_name, filepath in results:
+        table.add_row(loc_name, filepath)
+
+    console.print(table)
+    console.print(f"\n[green]Saved {len(results)} blueprints to {output_dir}/[/green]")
+
+
+@bulk_app.command("audit")
+def bulk_audit_cmd(
+    blueprint_file: str = typer.Argument(..., help="Path to blueprint YAML file"),
+):
+    """Audit all locations against a blueprint."""
+    from .api import GHLClient
+    from .blueprint.serialization import load_blueprint
+
+    bp = load_blueprint(blueprint_file)
+
+    async def _bulk_audit():
+        async with GHLClient.from_session() as ghl:
+            from .blueprint.engine import bulk_audit
+            return await bulk_audit(ghl, bp)
+
+    with console.status("[bold cyan]Auditing all locations...[/bold cyan]"):
+        results = asyncio.run(_bulk_audit())
+
+    from .blueprint.diff import render_bulk_audit
+    render_bulk_audit(results, console)
+
+
+# ============================================================================
 # Main
 # ============================================================================
 
