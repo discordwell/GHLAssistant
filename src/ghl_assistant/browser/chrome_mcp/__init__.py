@@ -9,5 +9,6 @@ helper methods for common tasks like login, navigation, and token capture.
 
 from .agent import ChromeMCPAgent
 from .tasks import GHLBrowserTasks
+from .ai_tasks import AIBrowserTasks
 
-__all__ = ["ChromeMCPAgent", "GHLBrowserTasks"]
+__all__ = ["ChromeMCPAgent", "GHLBrowserTasks", "AIBrowserTasks"]

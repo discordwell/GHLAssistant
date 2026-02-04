@@ -26,6 +26,8 @@ if TYPE_CHECKING:
     from .campaigns import CampaignsAPI
     from .surveys import SurveysAPI
     from .funnels import FunnelsAPI
+    from .conversation_ai import ConversationAIAPI
+    from .voice_ai import VoiceAIAPI
 
 
 @dataclass
@@ -137,6 +139,8 @@ class GHLClient:
         self._campaigns: CampaignsAPI | None = None
         self._surveys: SurveysAPI | None = None
         self._funnels: FunnelsAPI | None = None
+        self._conversation_ai: ConversationAIAPI | None = None
+        self._voice_ai: VoiceAIAPI | None = None
 
     @classmethod
     def from_session(cls, filepath: str | Path | None = None) -> "GHLClient":
@@ -169,6 +173,8 @@ class GHLClient:
         from .campaigns import CampaignsAPI
         from .surveys import SurveysAPI
         from .funnels import FunnelsAPI
+        from .conversation_ai import ConversationAIAPI
+        from .voice_ai import VoiceAIAPI
 
         self._contacts = ContactsAPI(self)
         self._workflows = WorkflowsAPI(self)
@@ -182,6 +188,8 @@ class GHLClient:
         self._campaigns = CampaignsAPI(self)
         self._surveys = SurveysAPI(self)
         self._funnels = FunnelsAPI(self)
+        self._conversation_ai = ConversationAIAPI(self)
+        self._voice_ai = VoiceAIAPI(self)
 
         # Auto-detect location if not set
         if not self.config.location_id and self.config.company_id:
@@ -283,6 +291,20 @@ class GHLClient:
             raise RuntimeError("Client not initialized. Use 'async with' context.")
         return self._funnels
 
+    @property
+    def conversation_ai(self) -> "ConversationAIAPI":
+        """Conversation AI API."""
+        if not self._conversation_ai:
+            raise RuntimeError("Client not initialized. Use 'async with' context.")
+        return self._conversation_ai
+
+    @property
+    def voice_ai(self) -> "VoiceAIAPI":
+        """Voice AI API."""
+        if not self._voice_ai:
+            raise RuntimeError("Client not initialized. Use 'async with' context.")
+        return self._voice_ai
+
     # HTTP methods
     async def _get(self, endpoint: str, **params) -> dict[str, Any]:
         """Make GET request."""
@@ -305,6 +327,12 @@ class GHLClient:
     async def _delete(self, endpoint: str) -> dict[str, Any]:
         """Make DELETE request."""
         resp = await self._client.delete(endpoint)
+        resp.raise_for_status()
+        return resp.json()
+
+    async def _patch(self, endpoint: str, data: dict | None = None) -> dict[str, Any]:
+        """Make PATCH request (used by Voice AI)."""
+        resp = await self._client.patch(endpoint, json=data)
         resp.raise_for_status()
         return resp.json()
 

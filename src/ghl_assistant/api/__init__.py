@@ -30,6 +30,8 @@ from .custom_values import CustomValuesAPI
 from .campaigns import CampaignsAPI
 from .surveys import SurveysAPI
 from .funnels import FunnelsAPI
+from .conversation_ai import ConversationAIAPI
+from .voice_ai import VoiceAIAPI
 
 __all__ = [
     "GHLClient",
@@ -46,4 +48,6 @@ __all__ = [
     "CampaignsAPI",
     "SurveysAPI",
     "FunnelsAPI",
+    "ConversationAIAPI",
+    "VoiceAIAPI",
 ]

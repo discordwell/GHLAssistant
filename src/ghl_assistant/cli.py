@@ -28,6 +28,8 @@ calendars_app = typer.Typer(help="Calendar and appointment management")
 opportunities_app = typer.Typer(help="Pipeline and opportunity management")
 forms_app = typer.Typer(help="Forms and submissions")
 account_app = typer.Typer(help="Account and location info")
+ai_app = typer.Typer(help="Conversation AI agent management")
+voice_app = typer.Typer(help="Voice AI agent management")
 
 app.add_typer(auth_app, name="auth")
 app.add_typer(tdlc_app, name="10dlc")
@@ -40,6 +42,8 @@ app.add_typer(calendars_app, name="calendars")
 app.add_typer(opportunities_app, name="opportunities")
 app.add_typer(forms_app, name="forms")
 app.add_typer(account_app, name="account")
+app.add_typer(ai_app, name="ai")
+app.add_typer(voice_app, name="voice")
 
 
 def _output_result(result: dict[str, Any], json_output: bool = False) -> None:
@@ -985,6 +989,653 @@ def account_locations(
                 loc.get("name", "-"),
                 loc.get("phone", "-"),
                 loc.get("email", "-"),
+            )
+
+        console.print(table)
+
+
+# ============================================================================
+# Conversation AI Commands
+# ============================================================================
+
+
+@ai_app.command("list")
+def ai_list(
+    limit: int = typer.Option(50, "--limit", "-l", help="Max agents to return"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """List all conversation AI agents."""
+    from .api import GHLClient
+
+    async def _list():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.conversation_ai.list_agents(limit=limit)
+
+    result = asyncio.run(_list())
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        agents = result.get("agents", [])
+        table = Table(title=f"Conversation AI Agents ({len(agents)})")
+        table.add_column("ID", style="dim", max_width=24)
+        table.add_column("Name", style="cyan")
+        table.add_column("Model", style="yellow")
+        table.add_column("Enabled", style="green")
+
+        for a in agents:
+            enabled = "[green]Yes[/green]" if a.get("enabled", False) else "[red]No[/red]"
+            table.add_row(
+                a.get("id", a.get("_id", ""))[:24],
+                a.get("name", "-"),
+                a.get("model", "-"),
+                enabled,
+            )
+
+        console.print(table)
+
+
+@ai_app.command("get")
+def ai_get(
+    agent_id: str = typer.Argument(..., help="Agent ID"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Get a conversation AI agent by ID."""
+    from .api import GHLClient
+
+    async def _get():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.conversation_ai.get_agent(agent_id)
+
+    result = asyncio.run(_get())
+    _output_result(result, json_output)
+
+
+@ai_app.command("create")
+def ai_create(
+    name: str = typer.Argument(..., help="Agent name"),
+    prompt: str = typer.Option(None, "--prompt", "-p", help="System prompt"),
+    model: str = typer.Option("gpt-4", "--model", "-m", help="AI model"),
+    temperature: float = typer.Option(0.7, "--temperature", "-t", help="Temperature (0-1)"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Create a new conversation AI agent."""
+    from .api import GHLClient
+
+    async def _create():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.conversation_ai.create_agent(
+                name=name,
+                prompt=prompt,
+                model=model,
+                temperature=temperature,
+            )
+
+    result = asyncio.run(_create())
+    _output_result(result, json_output)
+    console.print("[green]Conversation AI agent created![/green]")
+
+
+@ai_app.command("update")
+def ai_update(
+    agent_id: str = typer.Argument(..., help="Agent ID"),
+    name: str = typer.Option(None, "--name", "-n", help="New agent name"),
+    prompt: str = typer.Option(None, "--prompt", "-p", help="New system prompt"),
+    model: str = typer.Option(None, "--model", "-m", help="New AI model"),
+    temperature: float = typer.Option(None, "--temperature", "-t", help="New temperature"),
+    enabled: bool = typer.Option(None, "--enabled/--disabled", help="Enable/disable agent"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Update a conversation AI agent."""
+    from .api import GHLClient
+
+    async def _update():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.conversation_ai.update_agent(
+                agent_id,
+                name=name,
+                prompt=prompt,
+                model=model,
+                temperature=temperature,
+                enabled=enabled,
+            )
+
+    result = asyncio.run(_update())
+    _output_result(result, json_output)
+    console.print("[green]Agent updated![/green]")
+
+
+@ai_app.command("delete")
+def ai_delete(
+    agent_id: str = typer.Argument(..., help="Agent ID"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+):
+    """Delete a conversation AI agent."""
+    from .api import GHLClient
+
+    if not yes:
+        confirm = typer.confirm(f"Delete agent {agent_id}?")
+        if not confirm:
+            console.print("[yellow]Aborted.[/yellow]")
+            raise typer.Exit(0)
+
+    async def _delete():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.conversation_ai.delete_agent(agent_id)
+
+    asyncio.run(_delete())
+    console.print("[green]Agent deleted![/green]")
+
+
+@ai_app.command("actions")
+def ai_actions(
+    agent_id: str = typer.Argument(..., help="Agent ID"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """List actions attached to an agent."""
+    from .api import GHLClient
+
+    async def _actions():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.conversation_ai.list_actions(agent_id)
+
+    result = asyncio.run(_actions())
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        actions = result.get("actions", [])
+        table = Table(title=f"Agent Actions ({len(actions)})")
+        table.add_column("ID", style="dim", max_width=24)
+        table.add_column("Type", style="yellow")
+        table.add_column("Trigger", style="cyan")
+
+        for a in actions:
+            table.add_row(
+                a.get("id", a.get("_id", ""))[:24],
+                a.get("type", "-"),
+                a.get("triggerCondition", "-"),
+            )
+
+        console.print(table)
+
+
+@ai_app.command("attach-action")
+def ai_attach_action(
+    agent_id: str = typer.Argument(..., help="Agent ID"),
+    action_id: str = typer.Argument(..., help="Workflow/action ID to attach"),
+    action_type: str = typer.Option("workflow", "--type", "-t", help="Action type"),
+    trigger: str = typer.Option(None, "--trigger", help="Trigger condition"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Attach a workflow action to an agent."""
+    from .api import GHLClient
+
+    async def _attach():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.conversation_ai.attach_action(
+                agent_id, action_id, action_type=action_type, trigger_condition=trigger
+            )
+
+    result = asyncio.run(_attach())
+    _output_result(result, json_output)
+    console.print("[green]Action attached![/green]")
+
+
+@ai_app.command("remove-action")
+def ai_remove_action(
+    agent_id: str = typer.Argument(..., help="Agent ID"),
+    action_id: str = typer.Argument(..., help="Action ID to remove"),
+):
+    """Remove an action from an agent."""
+    from .api import GHLClient
+
+    async def _remove():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.conversation_ai.remove_action(agent_id, action_id)
+
+    asyncio.run(_remove())
+    console.print("[green]Action removed![/green]")
+
+
+@ai_app.command("history")
+def ai_history(
+    agent_id: str = typer.Option(None, "--agent", "-a", help="Filter by agent ID"),
+    contact_id: str = typer.Option(None, "--contact", "-c", help="Filter by contact ID"),
+    limit: int = typer.Option(50, "--limit", "-l", help="Max results"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """View AI generation history (chat interactions)."""
+    from .api import GHLClient
+
+    async def _history():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.conversation_ai.list_generations(
+                agent_id=agent_id, contact_id=contact_id, limit=limit
+            )
+
+    result = asyncio.run(_history())
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        generations = result.get("generations", [])
+        table = Table(title=f"AI Generations ({len(generations)})")
+        table.add_column("ID", style="dim", max_width=16)
+        table.add_column("Agent", style="cyan", max_width=20)
+        table.add_column("Contact", style="white", max_width=16)
+        table.add_column("Created", style="yellow")
+
+        for g in generations:
+            table.add_row(
+                g.get("id", g.get("_id", ""))[:16],
+                g.get("agentId", "-")[:20],
+                g.get("contactId", "-")[:16],
+                g.get("createdAt", "-")[:19],
+            )
+
+        console.print(table)
+
+
+@ai_app.command("settings")
+def ai_settings(
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Get Conversation AI settings for the current location."""
+    from .api import GHLClient
+
+    async def _settings():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.conversation_ai.get_settings()
+
+    result = asyncio.run(_settings())
+    _output_result(result, json_output)
+
+
+# ============================================================================
+# Voice AI Commands
+# ============================================================================
+
+
+@voice_app.command("list")
+def voice_list(
+    limit: int = typer.Option(50, "--limit", "-l", help="Max agents to return"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """List all voice AI agents."""
+    from .api import GHLClient
+
+    async def _list():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.voice_ai.list_agents(limit=limit)
+
+    result = asyncio.run(_list())
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        agents = result.get("agents", [])
+        table = Table(title=f"Voice AI Agents ({len(agents)})")
+        table.add_column("ID", style="dim", max_width=24)
+        table.add_column("Name", style="cyan")
+        table.add_column("Voice", style="yellow")
+        table.add_column("Enabled", style="green")
+
+        for a in agents:
+            enabled = "[green]Yes[/green]" if a.get("enabled", False) else "[red]No[/red]"
+            table.add_row(
+                a.get("id", a.get("_id", ""))[:24],
+                a.get("name", "-"),
+                a.get("voiceId", "-")[:20] if a.get("voiceId") else "-",
+                enabled,
+            )
+
+        console.print(table)
+
+
+@voice_app.command("get")
+def voice_get(
+    agent_id: str = typer.Argument(..., help="Agent ID"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Get a voice AI agent by ID."""
+    from .api import GHLClient
+
+    async def _get():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.voice_ai.get_agent(agent_id)
+
+    result = asyncio.run(_get())
+    _output_result(result, json_output)
+
+
+@voice_app.command("create")
+def voice_create(
+    name: str = typer.Argument(..., help="Agent name"),
+    voice_id: str = typer.Argument(..., help="Voice profile ID (use 'ghl voice voices' to list)"),
+    prompt: str = typer.Option(None, "--prompt", "-p", help="System prompt"),
+    greeting: str = typer.Option(None, "--greeting", "-g", help="Initial greeting"),
+    model: str = typer.Option("gpt-4", "--model", "-m", help="AI model"),
+    temperature: float = typer.Option(0.7, "--temperature", "-t", help="Temperature (0-1)"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Create a new voice AI agent."""
+    from .api import GHLClient
+
+    async def _create():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.voice_ai.create_agent(
+                name=name,
+                voice_id=voice_id,
+                prompt=prompt,
+                greeting=greeting,
+                model=model,
+                temperature=temperature,
+            )
+
+    result = asyncio.run(_create())
+    _output_result(result, json_output)
+    console.print("[green]Voice AI agent created![/green]")
+
+
+@voice_app.command("update")
+def voice_update(
+    agent_id: str = typer.Argument(..., help="Agent ID"),
+    name: str = typer.Option(None, "--name", "-n", help="New agent name"),
+    voice_id: str = typer.Option(None, "--voice", "-v", help="New voice profile ID"),
+    prompt: str = typer.Option(None, "--prompt", "-p", help="New system prompt"),
+    greeting: str = typer.Option(None, "--greeting", "-g", help="New greeting"),
+    enabled: bool = typer.Option(None, "--enabled/--disabled", help="Enable/disable agent"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Update a voice AI agent."""
+    from .api import GHLClient
+
+    async def _update():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.voice_ai.update_agent(
+                agent_id,
+                name=name,
+                voice_id=voice_id,
+                prompt=prompt,
+                greeting=greeting,
+                enabled=enabled,
+            )
+
+    result = asyncio.run(_update())
+    _output_result(result, json_output)
+    console.print("[green]Agent updated![/green]")
+
+
+@voice_app.command("delete")
+def voice_delete(
+    agent_id: str = typer.Argument(..., help="Agent ID"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+):
+    """Delete a voice AI agent."""
+    from .api import GHLClient
+
+    if not yes:
+        confirm = typer.confirm(f"Delete voice agent {agent_id}?")
+        if not confirm:
+            console.print("[yellow]Aborted.[/yellow]")
+            raise typer.Exit(0)
+
+    async def _delete():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.voice_ai.delete_agent(agent_id)
+
+    asyncio.run(_delete())
+    console.print("[green]Voice agent deleted![/green]")
+
+
+@voice_app.command("voices")
+def voice_voices(
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """List available voice profiles."""
+    from .api import GHLClient
+
+    async def _voices():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.voice_ai.list_voices()
+
+    result = asyncio.run(_voices())
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        voices = result.get("voices", [])
+        table = Table(title=f"Available Voices ({len(voices)})")
+        table.add_column("ID", style="dim", max_width=30)
+        table.add_column("Name", style="cyan")
+        table.add_column("Preview URL", style="white", max_width=40)
+
+        for v in voices:
+            preview = v.get("previewUrl", v.get("preview_url", "-"))
+            if preview and len(preview) > 40:
+                preview = preview[:37] + "..."
+            table.add_row(
+                v.get("id", v.get("_id", ""))[:30],
+                v.get("name", "-"),
+                preview,
+            )
+
+        console.print(table)
+
+
+@voice_app.command("calls")
+def voice_calls(
+    agent_id: str = typer.Option(None, "--agent", "-a", help="Filter by agent ID"),
+    contact_id: str = typer.Option(None, "--contact", "-c", help="Filter by contact ID"),
+    status: str = typer.Option(None, "--status", "-s", help="Filter by status"),
+    limit: int = typer.Option(50, "--limit", "-l", help="Max results"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """List voice AI call logs."""
+    from .api import GHLClient
+
+    async def _calls():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.voice_ai.list_calls(
+                agent_id=agent_id, contact_id=contact_id, status=status, limit=limit
+            )
+
+    result = asyncio.run(_calls())
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        calls = result.get("calls", [])
+        table = Table(title=f"Voice AI Calls ({len(calls)})")
+        table.add_column("ID", style="dim", max_width=20)
+        table.add_column("Agent", style="cyan", max_width=16)
+        table.add_column("Duration", style="yellow")
+        table.add_column("Status", style="green")
+        table.add_column("Date", style="white")
+
+        for c in calls:
+            duration = c.get("duration", 0)
+            duration_str = f"{duration // 60}:{duration % 60:02d}" if duration else "-"
+            status_val = c.get("status", "-")
+            status_style = "green" if status_val == "completed" else "yellow"
+            table.add_row(
+                c.get("id", c.get("_id", ""))[:20],
+                c.get("agentId", "-")[:16],
+                duration_str,
+                f"[{status_style}]{status_val}[/{status_style}]",
+                c.get("createdAt", "-")[:19],
+            )
+
+        console.print(table)
+
+
+@voice_app.command("transcript")
+def voice_transcript(
+    call_id: str = typer.Argument(..., help="Call ID"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Get transcript for a voice call."""
+    from .api import GHLClient
+
+    async def _transcript():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.voice_ai.get_call(call_id)
+
+    result = asyncio.run(_transcript())
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        call = result.get("call", result)
+        console.print(
+            Panel(
+                f"[bold]Call ID:[/bold] {call.get('id', call_id)}\n"
+                f"[bold]Status:[/bold] {call.get('status', 'unknown')}\n"
+                f"[bold]Duration:[/bold] {call.get('duration', 0)}s\n"
+                f"[bold]Agent:[/bold] {call.get('agentId', 'unknown')}",
+                title="Call Details",
+            )
+        )
+
+        transcript = call.get("transcript", [])
+        if transcript:
+            console.print("\n[bold cyan]Transcript:[/bold cyan]")
+            for entry in transcript:
+                role = entry.get("role", "unknown")
+                text = entry.get("text", entry.get("content", ""))
+                style = "blue" if role == "assistant" else "white"
+                console.print(f"  [{style}]{role.upper()}:[/{style}] {text}")
+        else:
+            console.print("\n[yellow]No transcript available[/yellow]")
+
+        summary = call.get("summary")
+        if summary:
+            console.print(f"\n[bold]Summary:[/bold] {summary}")
+
+
+@voice_app.command("actions")
+def voice_actions(
+    agent_id: str = typer.Argument(..., help="Agent ID"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """List actions for a voice agent."""
+    from .api import GHLClient
+
+    async def _actions():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.voice_ai.list_actions(agent_id)
+
+    result = asyncio.run(_actions())
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        actions = result.get("actions", [])
+        table = Table(title=f"Voice Agent Actions ({len(actions)})")
+        table.add_column("ID", style="dim", max_width=24)
+        table.add_column("Name", style="cyan")
+        table.add_column("Type", style="yellow")
+        table.add_column("Trigger", style="white")
+
+        for a in actions:
+            table.add_row(
+                a.get("id", a.get("_id", ""))[:24],
+                a.get("name", "-"),
+                a.get("type", "-"),
+                a.get("triggerCondition", "-"),
+            )
+
+        console.print(table)
+
+
+@voice_app.command("add-action")
+def voice_add_action(
+    agent_id: str = typer.Argument(..., help="Agent ID"),
+    action_type: str = typer.Argument(..., help="Action type (workflow, webhook, transfer, hangup)"),
+    name: str = typer.Argument(..., help="Action name"),
+    trigger: str = typer.Option(None, "--trigger", "-t", help="Trigger condition"),
+    workflow_id: str = typer.Option(None, "--workflow", "-w", help="Workflow ID (if type=workflow)"),
+    webhook_url: str = typer.Option(None, "--webhook", help="Webhook URL (if type=webhook)"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Add an action to a voice agent."""
+    from .api import GHLClient
+
+    async def _add():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.voice_ai.create_action(
+                agent_id,
+                action_type=action_type,
+                name=name,
+                trigger_condition=trigger,
+                workflow_id=workflow_id,
+                webhook_url=webhook_url,
+            )
+
+    result = asyncio.run(_add())
+    _output_result(result, json_output)
+    console.print("[green]Action added![/green]")
+
+
+@voice_app.command("remove-action")
+def voice_remove_action(
+    agent_id: str = typer.Argument(..., help="Agent ID"),
+    action_id: str = typer.Argument(..., help="Action ID to remove"),
+):
+    """Remove an action from a voice agent."""
+    from .api import GHLClient
+
+    async def _remove():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.voice_ai.delete_action(agent_id, action_id)
+
+    asyncio.run(_remove())
+    console.print("[green]Action removed![/green]")
+
+
+@voice_app.command("settings")
+def voice_settings(
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Get Voice AI settings for the current location."""
+    from .api import GHLClient
+
+    async def _settings():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.voice_ai.get_settings()
+
+    result = asyncio.run(_settings())
+    _output_result(result, json_output)
+
+
+@voice_app.command("phones")
+def voice_phones(
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """List phone numbers available for Voice AI."""
+    from .api import GHLClient
+
+    async def _phones():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.voice_ai.list_phone_numbers()
+
+    result = asyncio.run(_phones())
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        phones = result.get("phoneNumbers", [])
+        table = Table(title=f"Voice AI Phone Numbers ({len(phones)})")
+        table.add_column("ID", style="dim", max_width=24)
+        table.add_column("Number", style="cyan")
+        table.add_column("Assigned To", style="yellow")
+
+        for p in phones:
+            table.add_row(
+                p.get("id", p.get("_id", ""))[:24],
+                p.get("phone", p.get("number", "-")),
+                p.get("agentId", "-") if p.get("agentId") else "[dim]Unassigned[/dim]",
             )
 
         console.print(table)
