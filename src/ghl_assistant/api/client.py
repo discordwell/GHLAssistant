@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from .funnels import FunnelsAPI
     from .conversation_ai import ConversationAIAPI
     from .voice_ai import VoiceAIAPI
+    from .agency import AgencyAPI
 
 
 @dataclass
@@ -141,6 +142,7 @@ class GHLClient:
         self._funnels: FunnelsAPI | None = None
         self._conversation_ai: ConversationAIAPI | None = None
         self._voice_ai: VoiceAIAPI | None = None
+        self._agency: AgencyAPI | None = None
 
     @classmethod
     def from_session(cls, filepath: str | Path | None = None) -> "GHLClient":
@@ -175,6 +177,7 @@ class GHLClient:
         from .funnels import FunnelsAPI
         from .conversation_ai import ConversationAIAPI
         from .voice_ai import VoiceAIAPI
+        from .agency import AgencyAPI
 
         self._contacts = ContactsAPI(self)
         self._workflows = WorkflowsAPI(self)
@@ -190,6 +193,7 @@ class GHLClient:
         self._funnels = FunnelsAPI(self)
         self._conversation_ai = ConversationAIAPI(self)
         self._voice_ai = VoiceAIAPI(self)
+        self._agency = AgencyAPI(self)
 
         # Auto-detect location if not set
         if not self.config.location_id and self.config.company_id:
@@ -304,6 +308,13 @@ class GHLClient:
         if not self._voice_ai:
             raise RuntimeError("Client not initialized. Use 'async with' context.")
         return self._voice_ai
+
+    @property
+    def agency(self) -> "AgencyAPI":
+        """Agency API for managing sub-accounts."""
+        if not self._agency:
+            raise RuntimeError("Client not initialized. Use 'async with' context.")
+        return self._agency
 
     # HTTP methods
     async def _get(self, endpoint: str, **params) -> dict[str, Any]:

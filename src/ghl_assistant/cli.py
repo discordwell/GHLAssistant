@@ -30,6 +30,7 @@ forms_app = typer.Typer(help="Forms and submissions")
 account_app = typer.Typer(help="Account and location info")
 ai_app = typer.Typer(help="Conversation AI agent management")
 voice_app = typer.Typer(help="Voice AI agent management")
+agency_app = typer.Typer(help="Agency-level sub-account management")
 
 app.add_typer(auth_app, name="auth")
 app.add_typer(tdlc_app, name="10dlc")
@@ -44,6 +45,7 @@ app.add_typer(forms_app, name="forms")
 app.add_typer(account_app, name="account")
 app.add_typer(ai_app, name="ai")
 app.add_typer(voice_app, name="voice")
+app.add_typer(agency_app, name="agency")
 
 
 def _output_result(result: dict[str, Any], json_output: bool = False) -> None:
@@ -1790,6 +1792,337 @@ def voice_phones(
             )
 
         console.print(table)
+
+
+# ============================================================================
+# Agency Commands (Sub-Account Management)
+# ============================================================================
+
+
+@agency_app.command("list")
+def agency_list(
+    search: str = typer.Option(None, "--search", "-s", help="Search by location name"),
+    limit: int = typer.Option(100, "--limit", "-l", help="Max locations to return"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """List all sub-accounts (locations) under the agency."""
+    from .api import GHLClient
+
+    async def _list():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.agency.list_locations(limit=limit, search=search)
+
+    result = asyncio.run(_list())
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        locations = result.get("locations", [])
+        table = Table(title=f"Sub-Accounts ({len(locations)})")
+        table.add_column("ID", style="dim", max_width=24)
+        table.add_column("Name", style="cyan")
+        table.add_column("Email", style="white")
+        table.add_column("Phone", style="green")
+        table.add_column("Timezone", style="yellow")
+
+        for loc in locations:
+            table.add_row(
+                loc.get("_id", loc.get("id", ""))[:24],
+                loc.get("name", "-"),
+                loc.get("email", "-"),
+                loc.get("phone", "-"),
+                loc.get("timezone", "-"),
+            )
+
+        console.print(table)
+
+
+@agency_app.command("get")
+def agency_get(
+    location_id: str = typer.Argument(..., help="Sub-account/location ID"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Get details of a specific sub-account."""
+    from .api import GHLClient
+
+    async def _get():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.agency.get_location(location_id)
+
+    result = asyncio.run(_get())
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        loc = result.get("location", result)
+        console.print(
+            Panel(
+                f"[bold]Name:[/bold] {loc.get('name', 'N/A')}\n"
+                f"[bold]ID:[/bold] {loc.get('_id', loc.get('id', 'N/A'))}\n"
+                f"[bold]Email:[/bold] {loc.get('email', 'N/A')}\n"
+                f"[bold]Phone:[/bold] {loc.get('phone', 'N/A')}\n"
+                f"[bold]Address:[/bold] {loc.get('address', '')} {loc.get('city', '')} {loc.get('state', '')} {loc.get('postalCode', '')}\n"
+                f"[bold]Country:[/bold] {loc.get('country', 'N/A')}\n"
+                f"[bold]Website:[/bold] {loc.get('website', 'N/A')}\n"
+                f"[bold]Timezone:[/bold] {loc.get('timezone', 'N/A')}",
+                title="Sub-Account Details",
+            )
+        )
+
+
+@agency_app.command("create")
+def agency_create(
+    name: str = typer.Argument(..., help="Business name for the sub-account"),
+    email: str = typer.Option(None, "--email", "-e", help="Primary contact email"),
+    phone: str = typer.Option(None, "--phone", "-p", help="Business phone (E.164 format)"),
+    address: str = typer.Option(None, "--address", "-a", help="Street address"),
+    city: str = typer.Option(None, "--city", help="City name"),
+    state: str = typer.Option(None, "--state", help="State/province code"),
+    postal_code: str = typer.Option(None, "--postal-code", "--zip", help="ZIP/postal code"),
+    country: str = typer.Option("US", "--country", "-c", help="Country code"),
+    website: str = typer.Option(None, "--website", "-w", help="Business website URL"),
+    timezone: str = typer.Option("America/New_York", "--timezone", "-t", help="IANA timezone"),
+    snapshot_id: str = typer.Option(None, "--snapshot", "-s", help="Snapshot ID to use as template"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Create a new sub-account.
+
+    Requires Agency Pro plan ($497/mo). Creates a new sub-account under
+    your agency that can be assigned to a client.
+
+    Examples:
+        ghl agency create "Acme Corp" --email acme@example.com --phone +15551234567
+        ghl agency create "Test Client" --snapshot snapshot_id_here
+    """
+    from .api import GHLClient
+
+    async def _create():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.agency.create_location(
+                name=name,
+                email=email,
+                phone=phone,
+                address=address,
+                city=city,
+                state=state,
+                postal_code=postal_code,
+                country=country,
+                website=website,
+                timezone=timezone,
+                snapshot_id=snapshot_id,
+            )
+
+    result = asyncio.run(_create())
+    _output_result(result, json_output)
+    console.print("[green]Sub-account created successfully![/green]")
+
+
+@agency_app.command("update")
+def agency_update(
+    location_id: str = typer.Argument(..., help="Sub-account ID to update"),
+    name: str = typer.Option(None, "--name", "-n", help="New business name"),
+    email: str = typer.Option(None, "--email", "-e", help="New contact email"),
+    phone: str = typer.Option(None, "--phone", "-p", help="New phone number"),
+    address: str = typer.Option(None, "--address", "-a", help="New street address"),
+    city: str = typer.Option(None, "--city", help="New city"),
+    state: str = typer.Option(None, "--state", help="New state/province"),
+    postal_code: str = typer.Option(None, "--postal-code", "--zip", help="New postal code"),
+    country: str = typer.Option(None, "--country", "-c", help="New country code"),
+    website: str = typer.Option(None, "--website", "-w", help="New website URL"),
+    timezone: str = typer.Option(None, "--timezone", "-t", help="New timezone"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Update an existing sub-account."""
+    from .api import GHLClient
+
+    async def _update():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.agency.update_location(
+                location_id,
+                name=name,
+                email=email,
+                phone=phone,
+                address=address,
+                city=city,
+                state=state,
+                postal_code=postal_code,
+                country=country,
+                website=website,
+                timezone=timezone,
+            )
+
+    result = asyncio.run(_update())
+    _output_result(result, json_output)
+    console.print("[green]Sub-account updated![/green]")
+
+
+@agency_app.command("delete")
+def agency_delete(
+    location_id: str = typer.Argument(..., help="Sub-account ID to delete"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+):
+    """Delete a sub-account.
+
+    WARNING: This permanently deletes the sub-account and ALL its data.
+    This action cannot be undone.
+    """
+    from .api import GHLClient
+
+    if not yes:
+        console.print(
+            f"[red]WARNING: This will permanently delete sub-account {location_id} "
+            "and ALL its data.[/red]"
+        )
+        confirm = typer.confirm(
+            "Are you sure?",
+            default=False,
+        )
+        if not confirm:
+            console.print("[yellow]Aborted.[/yellow]")
+            raise typer.Exit(0)
+
+    async def _delete():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.agency.delete_location(location_id)
+
+    asyncio.run(_delete())
+    console.print("[green]Sub-account deleted.[/green]")
+
+
+@agency_app.command("snapshots")
+def agency_snapshots(
+    limit: int = typer.Option(50, "--limit", "-l", help="Max snapshots to return"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """List available snapshots (location templates)."""
+    from .api import GHLClient
+
+    async def _list():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.agency.list_snapshots(limit=limit)
+
+    result = asyncio.run(_list())
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        snapshots = result.get("snapshots", [])
+        table = Table(title=f"Location Snapshots ({len(snapshots)})")
+        table.add_column("ID", style="dim", max_width=24)
+        table.add_column("Name", style="cyan")
+        table.add_column("Created", style="yellow")
+
+        for s in snapshots:
+            table.add_row(
+                s.get("_id", s.get("id", ""))[:24],
+                s.get("name", "-"),
+                s.get("createdAt", "-")[:19] if s.get("createdAt") else "-",
+            )
+
+        console.print(table)
+
+
+@agency_app.command("users")
+def agency_users(
+    location_id: str = typer.Option(None, "--location", "-l", help="Filter by location ID"),
+    limit: int = typer.Option(50, "--limit", help="Max users to return"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """List users in the agency or a specific sub-account."""
+    from .api import GHLClient
+
+    async def _list():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.agency.list_users(location_id=location_id, limit=limit)
+
+    result = asyncio.run(_list())
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        users = result.get("users", [])
+        title = f"Users ({len(users)})"
+        if location_id:
+            title = f"Users in Location ({len(users)})"
+
+        table = Table(title=title)
+        table.add_column("ID", style="dim", max_width=24)
+        table.add_column("Name", style="cyan")
+        table.add_column("Email", style="white")
+        table.add_column("Role", style="yellow")
+
+        for u in users:
+            name = f"{u.get('firstName', '')} {u.get('lastName', '')}".strip() or "-"
+            table.add_row(
+                u.get("_id", u.get("id", ""))[:24],
+                name,
+                u.get("email", "-"),
+                u.get("role", "-"),
+            )
+
+        console.print(table)
+
+
+@agency_app.command("invite")
+def agency_invite(
+    email: str = typer.Argument(..., help="User's email address"),
+    first_name: str = typer.Argument(..., help="User's first name"),
+    last_name: str = typer.Argument(..., help="User's last name"),
+    role: str = typer.Option("user", "--role", "-r", help="User role (admin, user)"),
+    location_id: str = typer.Option(None, "--location", "-l", help="Invite to specific sub-account"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Invite a user to the agency or a specific sub-account."""
+    from .api import GHLClient
+
+    async def _invite():
+        async with GHLClient.from_session() as ghl:
+            return await ghl.agency.invite_user(
+                email=email,
+                first_name=first_name,
+                last_name=last_name,
+                role=role,
+                location_id=location_id,
+            )
+
+    result = asyncio.run(_invite())
+    _output_result(result, json_output)
+    console.print(f"[green]Invitation sent to {email}![/green]")
+
+
+@agency_app.command("plan")
+def agency_plan(
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Get agency billing plan and sub-account limits."""
+    from .api import GHLClient
+
+    async def _plan():
+        async with GHLClient.from_session() as ghl:
+            plan = await ghl.agency.get_agency_plan()
+            try:
+                limits = await ghl.agency.get_location_limits()
+            except Exception:
+                limits = {}
+            return {"plan": plan, "limits": limits}
+
+    result = asyncio.run(_plan())
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        plan_data = result.get("plan", {})
+        limits = result.get("limits", {})
+
+        console.print(
+            Panel(
+                f"[bold]Plan:[/bold] {plan_data.get('name', plan_data.get('planName', 'Unknown'))}\n"
+                f"[bold]Status:[/bold] {plan_data.get('status', 'Unknown')}\n"
+                f"[bold]Sub-Accounts Used:[/bold] {limits.get('used', '?')} / {limits.get('limit', '?')}\n"
+                f"[bold]Remaining:[/bold] {limits.get('remaining', '?')}",
+                title="Agency Plan",
+            )
+        )
 
 
 # ============================================================================

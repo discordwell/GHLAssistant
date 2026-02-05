@@ -32,6 +32,7 @@ from .surveys import SurveysAPI
 from .funnels import FunnelsAPI
 from .conversation_ai import ConversationAIAPI
 from .voice_ai import VoiceAIAPI
+from .agency import AgencyAPI
 
 __all__ = [
     "GHLClient",
@@ -50,4 +51,5 @@ __all__ = [
     "FunnelsAPI",
     "ConversationAIAPI",
     "VoiceAIAPI",
+    "AgencyAPI",
 ]

@@ -149,11 +149,13 @@ def mock_ghl_client(mock_config, mock_http_client):
     from ghl_assistant.api.client import GHLClient
     from ghl_assistant.api.conversation_ai import ConversationAIAPI
     from ghl_assistant.api.voice_ai import VoiceAIAPI
+    from ghl_assistant.api.agency import AgencyAPI
 
     client = GHLClient(mock_config)
     client._client = mock_http_client
     client._conversation_ai = ConversationAIAPI(client)
     client._voice_ai = VoiceAIAPI(client)
+    client._agency = AgencyAPI(client)
 
     return client
 
@@ -315,6 +317,73 @@ def mock_ghl_client_context():
     })
     mock_client.voice_ai.list_phone_numbers = AsyncMock(return_value={
         "phoneNumbers": [MOCK_PHONE_NUMBER],
+    })
+
+    # Mock agency
+    mock_client.agency = AsyncMock()
+    mock_client.agency.list_locations = AsyncMock(return_value={
+        "locations": [
+            {
+                "_id": SAMPLE_LOCATION_ID,
+                "name": "Test Business",
+                "email": "test@example.com",
+                "timezone": "America/New_York",
+            }
+        ],
+        "total": 1,
+    })
+    mock_client.agency.get_location = AsyncMock(return_value={
+        "location": {
+            "_id": SAMPLE_LOCATION_ID,
+            "name": "Test Business",
+            "email": "test@example.com",
+        },
+    })
+    mock_client.agency.create_location = AsyncMock(return_value={
+        "location": {
+            "_id": "new_loc_123",
+            "name": "New Business",
+        },
+    })
+    mock_client.agency.update_location = AsyncMock(return_value={
+        "location": {
+            "_id": SAMPLE_LOCATION_ID,
+            "name": "Updated Business",
+        },
+    })
+    mock_client.agency.delete_location = AsyncMock(return_value={
+        "succeeded": True,
+    })
+    mock_client.agency.list_snapshots = AsyncMock(return_value={
+        "snapshots": [{"_id": "snap_123", "name": "Default Snapshot"}],
+        "total": 1,
+    })
+    mock_client.agency.list_users = AsyncMock(return_value={
+        "users": [
+            {
+                "_id": SAMPLE_USER_ID,
+                "firstName": "John",
+                "lastName": "Doe",
+                "email": "john@example.com",
+                "role": "admin",
+            }
+        ],
+        "total": 1,
+    })
+    mock_client.agency.invite_user = AsyncMock(return_value={
+        "user": {
+            "_id": "new_user_123",
+            "email": "invite@example.com",
+        },
+    })
+    mock_client.agency.get_agency_plan = AsyncMock(return_value={
+        "name": "Agency Pro",
+        "status": "active",
+    })
+    mock_client.agency.get_location_limits = AsyncMock(return_value={
+        "used": 5,
+        "limit": 10,
+        "remaining": 5,
     })
 
     return mock_client
