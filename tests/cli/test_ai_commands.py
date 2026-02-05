@@ -40,6 +40,7 @@ class TestAIListCommand:
             assert result.exit_code == 0
             assert "Conversation AI Agents" in result.output
             assert "Test Bot" in result.output
+            mock_ghl_client_context.conversation_ai.list_agents.assert_called_with(limit=50)
 
     def test_list_agents_json(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test listing agents with JSON output."""
@@ -50,6 +51,7 @@ class TestAIListCommand:
 
             assert result.exit_code == 0
             assert '"agents"' in result.output
+            mock_ghl_client_context.conversation_ai.list_agents.assert_called_with(limit=50)
 
     def test_list_agents_with_limit(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test listing agents with custom limit."""
@@ -305,7 +307,11 @@ class TestAIHistoryCommand:
 
             assert result.exit_code == 0
             assert "AI Generations" in result.output
-            mock_ghl_client_context.conversation_ai.list_generations.assert_called()
+            mock_ghl_client_context.conversation_ai.list_generations.assert_called_with(
+                agent_id=None,
+                contact_id=None,
+                limit=50,
+            )
 
     def test_list_history_with_agent_filter(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test filtering history by agent."""
@@ -335,7 +341,7 @@ class TestAISettingsCommand:
             result = cli_runner.invoke(app, ["ai", "settings"])
 
             assert result.exit_code == 0
-            mock_ghl_client_context.conversation_ai.get_settings.assert_called()
+            mock_ghl_client_context.conversation_ai.get_settings.assert_called_once()
             # Verify output displays settings info
             assert "gpt-4" in result.output or "enabled" in result.output.lower()
 

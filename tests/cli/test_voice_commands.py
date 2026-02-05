@@ -44,7 +44,7 @@ class TestVoiceListCommand:
             assert result.exit_code == 0
             assert "Voice AI Agents" in result.output
             assert "Voice Bot" in result.output
-            mock_ghl_client_context.voice_ai.list_agents.assert_called()
+            mock_ghl_client_context.voice_ai.list_agents.assert_called_with(limit=50)
 
     def test_list_agents_json(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test listing agents with JSON output."""
@@ -55,7 +55,7 @@ class TestVoiceListCommand:
 
             assert result.exit_code == 0
             assert '"agents"' in result.output
-            mock_ghl_client_context.voice_ai.list_agents.assert_called()
+            mock_ghl_client_context.voice_ai.list_agents.assert_called_with(limit=50)
 
 
 class TestVoiceGetCommand:
@@ -212,7 +212,7 @@ class TestVoiceVoicesCommand:
             assert result.exit_code == 0
             assert "Available Voices" in result.output
             assert "Sarah" in result.output
-            mock_ghl_client_context.voice_ai.list_voices.assert_called()
+            mock_ghl_client_context.voice_ai.list_voices.assert_called_once()
 
     def test_list_voices_json(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test listing voices with JSON output."""
@@ -239,7 +239,12 @@ class TestVoiceCallsCommand:
 
             assert result.exit_code == 0
             assert "Voice AI Calls" in result.output
-            mock_ghl_client_context.voice_ai.list_calls.assert_called()
+            mock_ghl_client_context.voice_ai.list_calls.assert_called_with(
+                agent_id=None,
+                contact_id=None,
+                status=None,
+                limit=50,
+            )
 
     def test_list_calls_with_filters(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test listing calls with filters."""
@@ -406,7 +411,7 @@ class TestVoiceSettingsCommand:
             result = cli_runner.invoke(app, ["voice", "settings"])
 
             assert result.exit_code == 0
-            mock_ghl_client_context.voice_ai.get_settings.assert_called()
+            mock_ghl_client_context.voice_ai.get_settings.assert_called_once()
             # Verify output displays settings info
             assert "gpt-4" in result.output or "enabled" in result.output.lower()
 
@@ -423,7 +428,7 @@ class TestVoicePhonesCommand:
 
             assert result.exit_code == 0
             assert "Phone Numbers" in result.output
-            mock_ghl_client_context.voice_ai.list_phone_numbers.assert_called()
+            mock_ghl_client_context.voice_ai.list_phone_numbers.assert_called_once()
             # Verify phone data displayed
             assert "+15551234567" in result.output or SAMPLE_PHONE_ID in result.output
 
