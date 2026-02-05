@@ -569,6 +569,157 @@ def workflows_add_contact(
     console.print("[green]Contact added to workflow![/green]")
 
 
+@workflows_app.command("create-for-ai")
+def workflows_create_for_ai(
+    name: str = typer.Argument(..., help="Workflow name"),
+    trigger: str = typer.Option(
+        "manual",
+        "--trigger",
+        "-t",
+        help="Trigger type: conversation_ai, voice_ai, manual",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", "-n", help="Show steps without executing"
+    ),
+):
+    """Create a workflow for AI agent triggers via browser automation.
+
+    Since GHL has no API for workflow creation, this uses browser
+    automation to create workflows through the GHL UI.
+
+    Requires Chrome with Claude-in-Chrome extension.
+
+    Examples:
+        ghl workflows create-for-ai "AI Lead Capture" --trigger conversation_ai
+        ghl workflows create-for-ai "Voice Follow-up" -t voice_ai --dry-run
+    """
+    from .browser.chrome_mcp.executor import create_workflow_plan
+
+    trigger_display = {
+        "conversation_ai": "Conversation AI",
+        "voice_ai": "Voice AI",
+        "manual": "Manual/Contact Added",
+    }.get(trigger, trigger)
+
+    console.print(
+        Panel(
+            f"[bold]Creating workflow via browser automation[/bold]\n\n"
+            f"Name: {name}\n"
+            f"Trigger: {trigger_display}\n\n"
+            "[dim]This will automate the GHL workflow builder.[/dim]",
+            title="Workflow Creator",
+        )
+    )
+
+    # Generate the plan (tab_id=0 is placeholder - Claude Code provides real ID)
+    plan = create_workflow_plan(tab_id=0, name=name, trigger=trigger)
+
+    if dry_run:
+        plan.print_plan(console)
+        console.print("[yellow]Dry run - no actions taken[/yellow]")
+        console.print(
+            "\n[dim]To execute, run without --dry-run flag and ensure Chrome "
+            "with Claude-in-Chrome is running.[/dim]"
+        )
+        return
+
+    # Show execution instructions
+    console.print("\n[bold cyan]Browser Automation Required[/bold cyan]\n")
+    console.print("Prerequisites:")
+    console.print("  1. Chrome with Claude-in-Chrome extension installed")
+    console.print("  2. Logged into GHL in the browser")
+    console.print("  3. Running within a Claude Code session\n")
+
+    plan.print_plan(console)
+
+    console.print(
+        Panel(
+            "[bold]Next Steps:[/bold]\n\n"
+            "Claude Code will execute these browser automation steps.\n"
+            "The workflow will be created in your GHL account.\n\n"
+            "[dim]Use --dry-run to preview steps without execution.[/dim]",
+            title="Ready for Execution",
+        )
+    )
+
+
+@workflows_app.command("connect-ai")
+def workflows_connect_ai(
+    workflow_name: str = typer.Argument(..., help="Workflow name"),
+    agent_name: str = typer.Argument(..., help="AI agent name"),
+    agent_type: str = typer.Option(
+        "conversation",
+        "--type",
+        "-t",
+        help="Agent type: conversation or voice",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", "-n", help="Show steps without executing"
+    ),
+):
+    """Connect a workflow to an AI agent via browser automation.
+
+    Links an existing workflow to a Conversation AI or Voice AI agent.
+    This enables the AI to trigger workflows based on conversation outcomes.
+
+    Requires Chrome with Claude-in-Chrome extension.
+
+    Examples:
+        ghl workflows connect-ai "AI Lead Capture" "Support Bot"
+        ghl workflows connect-ai "Voice Follow-up" "Sales Agent" --type voice
+    """
+    from .browser.chrome_mcp.executor import connect_workflow_plan
+
+    type_display = "Conversation AI" if agent_type == "conversation" else "Voice AI"
+
+    console.print(
+        Panel(
+            f"[bold]Connecting workflow to AI agent[/bold]\n\n"
+            f"Workflow: {workflow_name}\n"
+            f"Agent: {agent_name}\n"
+            f"Type: {type_display}\n\n"
+            "[dim]This will automate the agent configuration in GHL.[/dim]",
+            title="Workflow Connector",
+        )
+    )
+
+    # Generate the plan
+    plan = connect_workflow_plan(
+        tab_id=0,
+        workflow_name=workflow_name,
+        agent_name=agent_name,
+        agent_type=agent_type,
+    )
+
+    if dry_run:
+        plan.print_plan(console)
+        console.print("[yellow]Dry run - no actions taken[/yellow]")
+        console.print(
+            "\n[dim]To execute, run without --dry-run flag and ensure Chrome "
+            "with Claude-in-Chrome is running.[/dim]"
+        )
+        return
+
+    # Show execution instructions
+    console.print("\n[bold cyan]Browser Automation Required[/bold cyan]\n")
+    console.print("Prerequisites:")
+    console.print("  1. Chrome with Claude-in-Chrome extension installed")
+    console.print("  2. Logged into GHL in the browser")
+    console.print("  3. Running within a Claude Code session\n")
+
+    plan.print_plan(console)
+
+    console.print(
+        Panel(
+            "[bold]Next Steps:[/bold]\n\n"
+            "Claude Code will execute these browser automation steps.\n"
+            f"The workflow will be connected to agent '{agent_name}'.\n\n"
+            "[dim]Use --dry-run to preview steps without execution.[/dim]",
+            title="Ready for Execution",
+        )
+    )
+
+
 # ============================================================================
 # Conversations Commands
 # ============================================================================
