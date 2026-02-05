@@ -74,6 +74,8 @@ class TestAIGetCommand:
 
             assert result.exit_code == 0
             mock_ghl_client_context.conversation_ai.get_agent.assert_called_with(SAMPLE_AGENT_ID)
+            # Verify output contains agent data
+            assert "Test Bot" in result.output or SAMPLE_AGENT_ID in result.output
 
 
 class TestAICreateCommand:
@@ -88,7 +90,13 @@ class TestAICreateCommand:
 
             assert result.exit_code == 0
             assert "created" in result.output.lower()
-            mock_ghl_client_context.conversation_ai.create_agent.assert_called()
+            # CLI passes all parameters including defaults
+            mock_ghl_client_context.conversation_ai.create_agent.assert_called_with(
+                name="Test Bot",
+                prompt=None,
+                model="gpt-4",
+                temperature=0.7,
+            )
 
     def test_create_agent_full(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test creating an agent with all parameters."""
@@ -127,6 +135,15 @@ class TestAIUpdateCommand:
 
             assert result.exit_code == 0
             assert "updated" in result.output.lower()
+            # CLI passes all parameters including None for unspecified options
+            mock_ghl_client_context.conversation_ai.update_agent.assert_called_with(
+                SAMPLE_AGENT_ID,
+                name="Updated Bot",
+                prompt=None,
+                model=None,
+                temperature=0.9,
+                enabled=None,
+            )
 
     def test_update_agent_enable(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test enabling an agent."""
@@ -138,6 +155,14 @@ class TestAIUpdateCommand:
             ])
 
             assert result.exit_code == 0
+            mock_ghl_client_context.conversation_ai.update_agent.assert_called_with(
+                SAMPLE_AGENT_ID,
+                name=None,
+                prompt=None,
+                model=None,
+                temperature=None,
+                enabled=True,
+            )
 
     def test_update_agent_disable(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test disabling an agent."""
@@ -149,6 +174,14 @@ class TestAIUpdateCommand:
             ])
 
             assert result.exit_code == 0
+            mock_ghl_client_context.conversation_ai.update_agent.assert_called_with(
+                SAMPLE_AGENT_ID,
+                name=None,
+                prompt=None,
+                model=None,
+                temperature=None,
+                enabled=False,
+            )
 
 
 class TestAIDeleteCommand:
@@ -214,6 +247,12 @@ class TestAIAttachActionCommand:
 
             assert result.exit_code == 0
             assert "attached" in result.output.lower()
+            mock_ghl_client_context.conversation_ai.attach_action.assert_called_with(
+                SAMPLE_AGENT_ID,
+                SAMPLE_WORKFLOW_ID,
+                action_type="workflow",
+                trigger_condition=None,
+            )
 
     def test_attach_action_with_trigger(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test attaching an action with trigger condition."""
@@ -226,6 +265,12 @@ class TestAIAttachActionCommand:
             ])
 
             assert result.exit_code == 0
+            mock_ghl_client_context.conversation_ai.attach_action.assert_called_with(
+                SAMPLE_AGENT_ID,
+                SAMPLE_WORKFLOW_ID,
+                action_type="workflow",
+                trigger_condition="intent:book_appointment",
+            )
 
 
 class TestAIRemoveActionCommand:
@@ -242,6 +287,10 @@ class TestAIRemoveActionCommand:
 
             assert result.exit_code == 0
             assert "removed" in result.output.lower()
+            mock_ghl_client_context.conversation_ai.remove_action.assert_called_with(
+                SAMPLE_AGENT_ID,
+                SAMPLE_ACTION_ID,
+            )
 
 
 class TestAIHistoryCommand:
@@ -256,6 +305,7 @@ class TestAIHistoryCommand:
 
             assert result.exit_code == 0
             assert "AI Generations" in result.output
+            mock_ghl_client_context.conversation_ai.list_generations.assert_called()
 
     def test_list_history_with_agent_filter(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test filtering history by agent."""
@@ -267,7 +317,11 @@ class TestAIHistoryCommand:
             ])
 
             assert result.exit_code == 0
-            mock_ghl_client_context.conversation_ai.list_generations.assert_called()
+            mock_ghl_client_context.conversation_ai.list_generations.assert_called_with(
+                agent_id=SAMPLE_AGENT_ID,
+                contact_id=None,
+                limit=50,
+            )
 
 
 class TestAISettingsCommand:
@@ -282,6 +336,8 @@ class TestAISettingsCommand:
 
             assert result.exit_code == 0
             mock_ghl_client_context.conversation_ai.get_settings.assert_called()
+            # Verify output displays settings info
+            assert "gpt-4" in result.output or "enabled" in result.output.lower()
 
 
 class TestAICommandHelp:
@@ -311,3 +367,76 @@ class TestAICommandHelp:
         assert "--prompt" in result.output
         assert "--model" in result.output
         assert "--temperature" in result.output
+
+
+class TestAICommandErrors:
+    """Tests for AI command error handling."""
+
+    def test_list_agents_api_error(self, cli_runner, mock_ghl_client_context, mock_client_factory):
+        """Test CLI handles API errors gracefully."""
+        from httpx import HTTPStatusError
+
+        mock_ghl_client_context.conversation_ai.list_agents = AsyncMock(
+            side_effect=HTTPStatusError(
+                "HTTP 500", request=MagicMock(), response=MagicMock(status_code=500)
+            )
+        )
+
+        with patch("ghl_assistant.api.GHLClient") as MockClient:
+            MockClient.from_session.return_value = mock_client_factory()
+
+            result = cli_runner.invoke(app, ["ai", "list"])
+
+            # Should handle error gracefully (non-zero exit or error message)
+            assert result.exit_code != 0 or "error" in result.output.lower()
+
+    def test_get_agent_not_found(self, cli_runner, mock_ghl_client_context, mock_client_factory):
+        """Test CLI handles 404 error for non-existent agent."""
+        from httpx import HTTPStatusError
+
+        mock_ghl_client_context.conversation_ai.get_agent = AsyncMock(
+            side_effect=HTTPStatusError(
+                "HTTP 404", request=MagicMock(), response=MagicMock(status_code=404)
+            )
+        )
+
+        with patch("ghl_assistant.api.GHLClient") as MockClient:
+            MockClient.from_session.return_value = mock_client_factory()
+
+            result = cli_runner.invoke(app, ["ai", "get", "nonexistent_id"])
+
+            assert result.exit_code != 0 or "error" in result.output.lower() or "not found" in result.output.lower()
+
+    def test_create_agent_validation_error(self, cli_runner, mock_ghl_client_context, mock_client_factory):
+        """Test CLI displays validation errors."""
+        from httpx import HTTPStatusError
+
+        mock_response = MagicMock(status_code=400)
+        mock_response.json.return_value = {"error": "Validation error", "message": "Name is required"}
+        mock_ghl_client_context.conversation_ai.create_agent = AsyncMock(
+            side_effect=HTTPStatusError("HTTP 400", request=MagicMock(), response=mock_response)
+        )
+
+        with patch("ghl_assistant.api.GHLClient") as MockClient:
+            MockClient.from_session.return_value = mock_client_factory()
+
+            result = cli_runner.invoke(app, ["ai", "create", ""])
+
+            assert result.exit_code != 0 or "error" in result.output.lower()
+
+    def test_delete_agent_not_found(self, cli_runner, mock_ghl_client_context, mock_client_factory):
+        """Test CLI handles 404 on delete."""
+        from httpx import HTTPStatusError
+
+        mock_ghl_client_context.conversation_ai.delete_agent = AsyncMock(
+            side_effect=HTTPStatusError(
+                "HTTP 404", request=MagicMock(), response=MagicMock(status_code=404)
+            )
+        )
+
+        with patch("ghl_assistant.api.GHLClient") as MockClient:
+            MockClient.from_session.return_value = mock_client_factory()
+
+            result = cli_runner.invoke(app, ["ai", "delete", "nonexistent_id", "--yes"])
+
+            assert result.exit_code != 0 or "error" in result.output.lower() or "not found" in result.output.lower()

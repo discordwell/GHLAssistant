@@ -175,6 +175,51 @@ def mock_response():
     return _create_response
 
 
+@pytest.fixture
+def mock_error_response():
+    """Factory fixture to create common error responses."""
+    def _create_error(error_type: str):
+        from httpx import HTTPStatusError
+
+        error_configs = {
+            "not_found": {
+                "status_code": 404,
+                "data": {"error": "Resource not found", "message": "Agent not found"},
+            },
+            "validation": {
+                "status_code": 400,
+                "data": {"error": "Validation error", "message": "Invalid request data"},
+            },
+            "unauthorized": {
+                "status_code": 401,
+                "data": {"error": "Unauthorized", "message": "Invalid or expired token"},
+            },
+            "rate_limit": {
+                "status_code": 429,
+                "data": {"error": "Rate limit exceeded", "message": "Too many requests"},
+            },
+            "server_error": {
+                "status_code": 500,
+                "data": {"error": "Internal server error", "message": "An unexpected error occurred"},
+            },
+        }
+
+        config = error_configs.get(error_type, error_configs["server_error"])
+        response = MagicMock()
+        response.status_code = config["status_code"]
+        response.json.return_value = config["data"]
+        response.text = str(config["data"])
+        response.raise_for_status = MagicMock(
+            side_effect=HTTPStatusError(
+                f"HTTP {config['status_code']}",
+                request=MagicMock(),
+                response=response
+            )
+        )
+        return response
+    return _create_error
+
+
 # ============================================================================
 # CLI Testing Fixtures
 # ============================================================================

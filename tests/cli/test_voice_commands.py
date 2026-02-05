@@ -44,6 +44,7 @@ class TestVoiceListCommand:
             assert result.exit_code == 0
             assert "Voice AI Agents" in result.output
             assert "Voice Bot" in result.output
+            mock_ghl_client_context.voice_ai.list_agents.assert_called()
 
     def test_list_agents_json(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test listing agents with JSON output."""
@@ -54,6 +55,7 @@ class TestVoiceListCommand:
 
             assert result.exit_code == 0
             assert '"agents"' in result.output
+            mock_ghl_client_context.voice_ai.list_agents.assert_called()
 
 
 class TestVoiceGetCommand:
@@ -68,6 +70,8 @@ class TestVoiceGetCommand:
 
             assert result.exit_code == 0
             mock_ghl_client_context.voice_ai.get_agent.assert_called_with(SAMPLE_AGENT_ID)
+            # Verify output contains agent data
+            assert "Voice Bot" in result.output or SAMPLE_AGENT_ID in result.output
 
 
 class TestVoiceCreateCommand:
@@ -82,6 +86,15 @@ class TestVoiceCreateCommand:
 
             assert result.exit_code == 0
             assert "created" in result.output.lower()
+            # CLI passes all parameters including defaults
+            mock_ghl_client_context.voice_ai.create_agent.assert_called_with(
+                name="Test Voice",
+                voice_id=SAMPLE_VOICE_ID,
+                prompt=None,
+                greeting=None,
+                model="gpt-4",
+                temperature=0.7,
+            )
 
     def test_create_agent_full(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test creating a voice agent with all parameters."""
@@ -122,6 +135,14 @@ class TestVoiceUpdateCommand:
 
             assert result.exit_code == 0
             assert "updated" in result.output.lower()
+            mock_ghl_client_context.voice_ai.update_agent.assert_called_with(
+                SAMPLE_AGENT_ID,
+                name="Updated Voice",
+                voice_id=None,
+                prompt=None,
+                greeting=None,
+                enabled=None,
+            )
 
     def test_update_agent_voice(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test updating agent voice."""
@@ -134,6 +155,14 @@ class TestVoiceUpdateCommand:
             ])
 
             assert result.exit_code == 0
+            mock_ghl_client_context.voice_ai.update_agent.assert_called_with(
+                SAMPLE_AGENT_ID,
+                name=None,
+                voice_id="new_voice_id",
+                prompt=None,
+                greeting=None,
+                enabled=None,
+            )
 
 
 class TestVoiceDeleteCommand:
@@ -183,6 +212,7 @@ class TestVoiceVoicesCommand:
             assert result.exit_code == 0
             assert "Available Voices" in result.output
             assert "Sarah" in result.output
+            mock_ghl_client_context.voice_ai.list_voices.assert_called()
 
     def test_list_voices_json(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test listing voices with JSON output."""
@@ -193,6 +223,8 @@ class TestVoiceVoicesCommand:
 
             assert result.exit_code == 0
             assert '"voices"' in result.output
+            # Verify JSON contains voice data
+            assert SAMPLE_VOICE_ID in result.output or '"Sarah"' in result.output
 
 
 class TestVoiceCallsCommand:
@@ -207,6 +239,7 @@ class TestVoiceCallsCommand:
 
             assert result.exit_code == 0
             assert "Voice AI Calls" in result.output
+            mock_ghl_client_context.voice_ai.list_calls.assert_called()
 
     def test_list_calls_with_filters(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test listing calls with filters."""
@@ -221,6 +254,12 @@ class TestVoiceCallsCommand:
             ])
 
             assert result.exit_code == 0
+            mock_ghl_client_context.voice_ai.list_calls.assert_called_with(
+                agent_id=SAMPLE_AGENT_ID,
+                contact_id=None,
+                status="completed",
+                limit=25,
+            )
 
 
 class TestVoiceTranscriptCommand:
@@ -236,6 +275,8 @@ class TestVoiceTranscriptCommand:
             assert result.exit_code == 0
             assert "Call Details" in result.output or "Transcript" in result.output
             mock_ghl_client_context.voice_ai.get_call.assert_called_with(SAMPLE_CALL_ID)
+            # Verify transcript content is displayed
+            assert "appointment" in result.output.lower() or "hello" in result.output.lower()
 
     def test_get_transcript_json(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test getting transcript with JSON output."""
@@ -245,6 +286,8 @@ class TestVoiceTranscriptCommand:
             result = cli_runner.invoke(app, ["voice", "transcript", SAMPLE_CALL_ID, "--json"])
 
             assert result.exit_code == 0
+            # Verify JSON structure
+            assert '"call"' in result.output or '"transcript"' in result.output
 
 
 class TestVoiceActionsCommand:
@@ -259,6 +302,7 @@ class TestVoiceActionsCommand:
 
             assert result.exit_code == 0
             assert "Voice Agent Actions" in result.output
+            mock_ghl_client_context.voice_ai.list_actions.assert_called_with(SAMPLE_AGENT_ID)
 
 
 class TestVoiceAddActionCommand:
@@ -277,6 +321,14 @@ class TestVoiceAddActionCommand:
 
             assert result.exit_code == 0
             assert "added" in result.output.lower()
+            mock_ghl_client_context.voice_ai.create_action.assert_called_with(
+                SAMPLE_AGENT_ID,
+                action_type="workflow",
+                name="Book Appointment",
+                trigger_condition=None,
+                workflow_id=SAMPLE_WORKFLOW_ID,
+                webhook_url=None,
+            )
 
     def test_add_webhook_action(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test adding a webhook action."""
@@ -291,6 +343,14 @@ class TestVoiceAddActionCommand:
 
             assert result.exit_code == 0
             assert "added" in result.output.lower()
+            mock_ghl_client_context.voice_ai.create_action.assert_called_with(
+                SAMPLE_AGENT_ID,
+                action_type="webhook",
+                name="Notify CRM",
+                trigger_condition=None,
+                workflow_id=None,
+                webhook_url="https://example.com/webhook",
+            )
 
     def test_add_action_with_trigger(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test adding an action with trigger condition."""
@@ -305,6 +365,14 @@ class TestVoiceAddActionCommand:
             ])
 
             assert result.exit_code == 0
+            mock_ghl_client_context.voice_ai.create_action.assert_called_with(
+                SAMPLE_AGENT_ID,
+                action_type="workflow",
+                name="Schedule",
+                trigger_condition="intent:schedule_appointment",
+                workflow_id=SAMPLE_WORKFLOW_ID,
+                webhook_url=None,
+            )
 
 
 class TestVoiceRemoveActionCommand:
@@ -321,6 +389,10 @@ class TestVoiceRemoveActionCommand:
 
             assert result.exit_code == 0
             assert "removed" in result.output.lower()
+            mock_ghl_client_context.voice_ai.delete_action.assert_called_with(
+                SAMPLE_AGENT_ID,
+                SAMPLE_ACTION_ID,
+            )
 
 
 class TestVoiceSettingsCommand:
@@ -335,6 +407,8 @@ class TestVoiceSettingsCommand:
 
             assert result.exit_code == 0
             mock_ghl_client_context.voice_ai.get_settings.assert_called()
+            # Verify output displays settings info
+            assert "gpt-4" in result.output or "enabled" in result.output.lower()
 
 
 class TestVoicePhonesCommand:
@@ -350,6 +424,8 @@ class TestVoicePhonesCommand:
             assert result.exit_code == 0
             assert "Phone Numbers" in result.output
             mock_ghl_client_context.voice_ai.list_phone_numbers.assert_called()
+            # Verify phone data displayed
+            assert "+15551234567" in result.output or SAMPLE_PHONE_ID in result.output
 
     def test_list_phones_json(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test listing phones with JSON output."""
@@ -359,6 +435,8 @@ class TestVoicePhonesCommand:
             result = cli_runner.invoke(app, ["voice", "phones", "--json"])
 
             assert result.exit_code == 0
+            # Verify JSON structure
+            assert '"phoneNumbers"' in result.output or '"phone"' in result.output
 
 
 class TestVoiceCommandHelp:
@@ -393,3 +471,76 @@ class TestVoiceCommandHelp:
         assert "--model" in result.output
         assert "--temperature" in result.output
         assert "voice_id" in result.output.lower()
+
+
+class TestVoiceCommandErrors:
+    """Tests for Voice command error handling."""
+
+    def test_list_agents_api_error(self, cli_runner, mock_ghl_client_context, mock_client_factory):
+        """Test CLI handles API errors gracefully."""
+        from httpx import HTTPStatusError
+
+        mock_ghl_client_context.voice_ai.list_agents = AsyncMock(
+            side_effect=HTTPStatusError(
+                "HTTP 500", request=MagicMock(), response=MagicMock(status_code=500)
+            )
+        )
+
+        with patch("ghl_assistant.api.GHLClient") as MockClient:
+            MockClient.from_session.return_value = mock_client_factory()
+
+            result = cli_runner.invoke(app, ["voice", "list"])
+
+            # Should handle error gracefully
+            assert result.exit_code != 0 or "error" in result.output.lower()
+
+    def test_get_agent_not_found(self, cli_runner, mock_ghl_client_context, mock_client_factory):
+        """Test CLI handles 404 error for non-existent agent."""
+        from httpx import HTTPStatusError
+
+        mock_ghl_client_context.voice_ai.get_agent = AsyncMock(
+            side_effect=HTTPStatusError(
+                "HTTP 404", request=MagicMock(), response=MagicMock(status_code=404)
+            )
+        )
+
+        with patch("ghl_assistant.api.GHLClient") as MockClient:
+            MockClient.from_session.return_value = mock_client_factory()
+
+            result = cli_runner.invoke(app, ["voice", "get", "nonexistent_id"])
+
+            assert result.exit_code != 0 or "error" in result.output.lower() or "not found" in result.output.lower()
+
+    def test_create_agent_validation_error(self, cli_runner, mock_ghl_client_context, mock_client_factory):
+        """Test CLI displays validation errors."""
+        from httpx import HTTPStatusError
+
+        mock_response = MagicMock(status_code=400)
+        mock_response.json.return_value = {"error": "Validation error", "message": "voice_id is required"}
+        mock_ghl_client_context.voice_ai.create_agent = AsyncMock(
+            side_effect=HTTPStatusError("HTTP 400", request=MagicMock(), response=mock_response)
+        )
+
+        with patch("ghl_assistant.api.GHLClient") as MockClient:
+            MockClient.from_session.return_value = mock_client_factory()
+
+            result = cli_runner.invoke(app, ["voice", "create", "", ""])
+
+            assert result.exit_code != 0 or "error" in result.output.lower()
+
+    def test_get_transcript_not_found(self, cli_runner, mock_ghl_client_context, mock_client_factory):
+        """Test CLI handles 404 when getting non-existent call transcript."""
+        from httpx import HTTPStatusError
+
+        mock_ghl_client_context.voice_ai.get_call = AsyncMock(
+            side_effect=HTTPStatusError(
+                "HTTP 404", request=MagicMock(), response=MagicMock(status_code=404)
+            )
+        )
+
+        with patch("ghl_assistant.api.GHLClient") as MockClient:
+            MockClient.from_session.return_value = mock_client_factory()
+
+            result = cli_runner.invoke(app, ["voice", "transcript", "nonexistent_id"])
+
+            assert result.exit_code != 0 or "error" in result.output.lower() or "not found" in result.output.lower()

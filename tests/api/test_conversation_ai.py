@@ -362,51 +362,120 @@ class TestConversationAIAPI:
             await mock_ghl_client.conversation_ai.create_agent(name="Test")
 
 
-class TestConversationAIAPIIntegration:
-    """Integration-style tests for ConversationAIAPI."""
+class TestConversationAIEdgeCases:
+    """Edge case tests for ConversationAIAPI."""
 
     @pytest.mark.asyncio
-    async def test_full_agent_lifecycle(self, mock_ghl_client, mock_response):
-        """Test creating, updating, and deleting an agent."""
-        # Create
-        mock_ghl_client._client.post = AsyncMock(
-            return_value=mock_response({"agent": MOCK_CONVERSATION_AI_AGENT})
+    async def test_list_agents_empty(self, mock_ghl_client, mock_response):
+        """Test handling empty agent list."""
+        expected_data = {"agents": [], "total": 0}
+        mock_ghl_client._client.get = AsyncMock(
+            return_value=mock_response(expected_data)
         )
-        create_result = await mock_ghl_client.conversation_ai.create_agent(
-            name="Lifecycle Test",
-            prompt="Test prompt",
-        )
-        assert create_result["agent"]["name"] == "Test Bot"
 
-        # Update
-        mock_ghl_client._client.put = AsyncMock(
-            return_value=mock_response({"agent": {**MOCK_CONVERSATION_AI_AGENT, "enabled": False}})
-        )
-        update_result = await mock_ghl_client.conversation_ai.update_agent(
-            SAMPLE_AGENT_ID,
-            enabled=False,
-        )
-        assert update_result["agent"]["enabled"] is False
+        result = await mock_ghl_client.conversation_ai.list_agents()
 
-        # Delete
-        mock_ghl_client._client.delete = AsyncMock(
-            return_value=mock_response({"succeeded": True})
-        )
-        delete_result = await mock_ghl_client.conversation_ai.delete_agent(SAMPLE_AGENT_ID)
-        assert delete_result["succeeded"] is True
+        assert result == expected_data
+        assert result["agents"] == []
+        assert result["total"] == 0
 
     @pytest.mark.asyncio
-    async def test_attach_workflow_to_agent(self, mock_ghl_client, mock_response):
-        """Test attaching a workflow action to an agent."""
+    async def test_list_actions_empty(self, mock_ghl_client, mock_response):
+        """Test handling agent with no actions."""
+        expected_data = {"actions": []}
+        mock_ghl_client._client.get = AsyncMock(
+            return_value=mock_response(expected_data)
+        )
+
+        result = await mock_ghl_client.conversation_ai.list_actions(SAMPLE_AGENT_ID)
+
+        assert result == expected_data
+        assert result["actions"] == []
+
+    @pytest.mark.asyncio
+    async def test_list_generations_empty(self, mock_ghl_client, mock_response):
+        """Test handling no generation history."""
+        expected_data = {"generations": [], "total": 0}
+        mock_ghl_client._client.get = AsyncMock(
+            return_value=mock_response(expected_data)
+        )
+
+        result = await mock_ghl_client.conversation_ai.list_generations()
+
+        assert result == expected_data
+        assert result["generations"] == []
+        assert result["total"] == 0
+
+    @pytest.mark.asyncio
+    async def test_agent_with_unicode_name(self, mock_ghl_client, mock_response):
+        """Test agents with unicode characters in name."""
+        unicode_agent = {
+            "id": SAMPLE_AGENT_ID,
+            "name": "Bot de Atención 日本語 🤖",
+            "model": "gpt-4",
+            "temperature": 0.7,
+            "enabled": True,
+            "locationId": SAMPLE_LOCATION_ID,
+        }
+        expected_data = {"agent": unicode_agent}
         mock_ghl_client._client.post = AsyncMock(
-            return_value=mock_response({"action": MOCK_ACTION})
+            return_value=mock_response(expected_data)
         )
 
-        result = await mock_ghl_client.conversation_ai.attach_action(
-            SAMPLE_AGENT_ID,
-            SAMPLE_WORKFLOW_ID,
-            action_type="workflow",
+        result = await mock_ghl_client.conversation_ai.create_agent(
+            name="Bot de Atención 日本語 🤖"
         )
 
-        assert result["action"]["type"] == "workflow"
-        assert result["action"]["actionId"] == SAMPLE_WORKFLOW_ID
+        assert result["agent"]["name"] == "Bot de Atención 日本語 🤖"
+
+    @pytest.mark.asyncio
+    async def test_agent_with_very_long_prompt(self, mock_ghl_client, mock_response):
+        """Test agents with maximum length prompts."""
+        long_prompt = "You are a helpful assistant. " * 1000
+        expected_data = {"agent": {**MOCK_CONVERSATION_AI_AGENT, "prompt": long_prompt}}
+        mock_ghl_client._client.post = AsyncMock(
+            return_value=mock_response(expected_data)
+        )
+
+        result = await mock_ghl_client.conversation_ai.create_agent(
+            name="Long Prompt Bot",
+            prompt=long_prompt,
+        )
+
+        call_args = mock_ghl_client._client.post.call_args
+        assert call_args[1]["json"]["prompt"] == long_prompt
+
+    @pytest.mark.asyncio
+    async def test_agent_with_missing_optional_fields(self, mock_ghl_client, mock_response):
+        """Test response with missing optional fields."""
+        minimal_agent = {
+            "id": SAMPLE_AGENT_ID,
+            "name": "Minimal Bot",
+            "locationId": SAMPLE_LOCATION_ID,
+        }
+        expected_data = {"agent": minimal_agent}
+        mock_ghl_client._client.get = AsyncMock(
+            return_value=mock_response(expected_data)
+        )
+
+        result = await mock_ghl_client.conversation_ai.get_agent(SAMPLE_AGENT_ID)
+
+        assert result["agent"]["id"] == SAMPLE_AGENT_ID
+        assert result["agent"]["name"] == "Minimal Bot"
+        # Optional fields should not cause errors when missing
+        assert "prompt" not in result["agent"]
+        assert "temperature" not in result["agent"]
+
+    @pytest.mark.asyncio
+    async def test_list_conversations_empty(self, mock_ghl_client, mock_response):
+        """Test handling agent with no conversations."""
+        expected_data = {"conversations": [], "total": 0}
+        mock_ghl_client._client.get = AsyncMock(
+            return_value=mock_response(expected_data)
+        )
+
+        result = await mock_ghl_client.conversation_ai.list_conversations(SAMPLE_AGENT_ID)
+
+        assert result == expected_data
+        assert result["conversations"] == []
+
