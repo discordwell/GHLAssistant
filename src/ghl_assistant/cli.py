@@ -61,39 +61,445 @@ def _output_result(result: dict[str, Any], json_output: bool = False) -> None:
 # Auth Commands
 # ============================================================================
 
+oauth_app = typer.Typer(help="OAuth authentication commands")
+app.add_typer(oauth_app, name="oauth")
 
-@auth_app.command("login")
-def auth_login():
-    """Authenticate with GoHighLevel via OAuth."""
-    console.print(
-        Panel(
-            "[yellow]OAuth login not yet implemented.[/yellow]\n\n"
-            "For now, set your API credentials in a .env file:\n"
-            "  GHL_API_KEY=your_api_key\n"
-            "  GHL_LOCATION_ID=your_location_id",
-            title="Authentication",
-        )
-    )
+
+@auth_app.command("quick")
+def auth_quick(
+    profile: str = typer.Option(
+        "ghl_session",
+        "--profile", "-p",
+        help="Browser profile name",
+    ),
+    timeout: int = typer.Option(
+        300,
+        "--timeout", "-t",
+        help="Max seconds to wait for login",
+    ),
+):
+    """Quick one-command token capture from browser.
+
+    Opens a browser, waits for you to log in (if needed),
+    captures the session token, and stores it for API use.
+    """
+    from .browser.agent import BrowserAgent
+    from .auth import TokenManager
+
+    async def _quick_capture():
+        async with BrowserAgent(profile_name=profile, capture_network=True) as agent:
+            # Navigate to GHL
+            console.print("[dim]Opening browser...[/dim]")
+            await agent.navigate("https://app.gohighlevel.com/")
+
+            # Check if logged in
+            if not await agent.is_logged_in():
+                console.print(
+                    Panel(
+                        "[bold yellow]Please log in to GoHighLevel in the browser window.[/bold yellow]\n\n"
+                        "Your session will be saved for future API access.",
+                        title="Login Required",
+                    )
+                )
+
+                # Wait for login
+                import time
+                start = time.time()
+                while time.time() - start < timeout:
+                    await asyncio.sleep(2)
+                    if await agent.is_logged_in():
+                        console.print("[green]Login detected![/green]")
+                        break
+                else:
+                    return {"success": False, "error": "Login timeout"}
+
+            # Give some time for API calls to happen
+            console.print("[dim]Capturing session data...[/dim]")
+            await asyncio.sleep(3)
+
+            # Extract tokens
+            tokens = agent.get_auth_tokens()
+            ghl_data = agent.network.get_ghl_specific() if agent.network else {}
+
+            if not tokens.get("access_token"):
+                # Navigate to a data-heavy page to trigger API calls
+                await agent.navigate("https://app.gohighlevel.com/contacts/")
+                await asyncio.sleep(3)
+                tokens = agent.get_auth_tokens()
+                ghl_data = agent.network.get_ghl_specific() if agent.network else {}
+
+            if not tokens.get("access_token"):
+                return {"success": False, "error": "Could not capture auth token"}
+
+            # Save to token manager
+            manager = TokenManager()
+            manager.save_session_from_capture(
+                token=tokens["access_token"],
+                location_id=ghl_data.get("location_id"),
+                company_id=ghl_data.get("auth", {}).get("companyId"),
+                user_id=ghl_data.get("auth", {}).get("userId"),
+            )
+
+            return {
+                "success": True,
+                "location_id": ghl_data.get("location_id"),
+                "company_id": ghl_data.get("auth", {}).get("companyId"),
+            }
+
+    try:
+        result = asyncio.run(_quick_capture())
+
+        if result.get("success"):
+            console.print(
+                Panel(
+                    f"[bold green]Session captured successfully![/bold green]\n\n"
+                    f"Location ID: {result.get('location_id', 'N/A')}\n"
+                    f"Company ID: {result.get('company_id', 'N/A')}\n\n"
+                    "[dim]You can now use 'ghl contacts list' and other API commands.[/dim]",
+                    title="Auth Complete",
+                )
+            )
+        else:
+            console.print(f"[red]Error: {result.get('error')}[/red]")
+            raise typer.Exit(1)
+
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Capture cancelled[/yellow]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
 
 
 @auth_app.command("status")
 def auth_status():
-    """Check current authentication status."""
-    from dotenv import dotenv_values
+    """Check current authentication status and token health."""
+    from .auth import TokenManager
 
-    config = dotenv_values(".env")
+    manager = TokenManager()
+    status = manager.get_status()
 
-    table = Table(title="GHL Authentication Status")
-    table.add_column("Setting", style="cyan")
-    table.add_column("Status", style="green")
+    console.print(Panel("[bold]GHL Authentication Status[/bold]", expand=False))
 
-    api_key = config.get("GHL_API_KEY")
-    location_id = config.get("GHL_LOCATION_ID")
+    # OAuth status
+    oauth_info = status.get("oauth_token")
+    if oauth_info:
+        if oauth_info["valid"]:
+            expires_in = oauth_info["expires_in_seconds"]
+            if expires_in > 3600:
+                expiry_str = f"[green]{expires_in // 3600}h {(expires_in % 3600) // 60}m[/green]"
+            elif expires_in > 300:
+                expiry_str = f"[yellow]{expires_in // 60}m[/yellow]"
+            else:
+                expiry_str = f"[red]{expires_in}s (refresh soon)[/red]"
 
-    table.add_row("API Key", "Set" if api_key else "[red]Not set[/red]")
-    table.add_row("Location ID", location_id if location_id else "[red]Not set[/red]")
+            console.print(f"\n[bold cyan]OAuth Token[/bold cyan]")
+            console.print(f"  Status: [green]Valid[/green]")
+            console.print(f"  Expires in: {expiry_str}")
+            console.print(f"  Company ID: {oauth_info.get('company_id', 'N/A')}")
+            console.print(f"  Location ID: {oauth_info.get('location_id', 'N/A')}")
+            console.print(f"  Scope: {oauth_info.get('scope', 'N/A')}")
+        else:
+            console.print(f"\n[bold cyan]OAuth Token[/bold cyan]")
+            console.print(f"  Status: [red]Expired[/red] (will auto-refresh)")
+    elif status.get("oauth_configured"):
+        console.print(f"\n[bold cyan]OAuth[/bold cyan]")
+        console.print(f"  Status: [yellow]Configured but no token[/yellow]")
+        console.print(f"  [dim]Run 'ghl oauth connect' to authenticate[/dim]")
+    else:
+        console.print(f"\n[bold cyan]OAuth[/bold cyan]")
+        console.print(f"  Status: [dim]Not configured[/dim]")
+        console.print(f"  [dim]Run 'ghl oauth setup' to configure[/dim]")
 
-    console.print(table)
+    # Session token status
+    session_info = status.get("session_token")
+    if session_info:
+        age = session_info["age_hours"]
+        if age < 12:
+            age_str = f"[green]{age:.1f}h ago[/green]"
+        elif age < 24:
+            age_str = f"[yellow]{age:.1f}h ago[/yellow]"
+        else:
+            age_str = f"[red]{age:.1f}h ago (may be expired)[/red]"
+
+        console.print(f"\n[bold cyan]Session Token[/bold cyan]")
+        console.print(f"  Status: [green]Available[/green]")
+        console.print(f"  Captured: {age_str}")
+        console.print(f"  Company ID: {session_info.get('company_id', 'N/A')}")
+        console.print(f"  Location ID: {session_info.get('location_id', 'N/A')}")
+        console.print(f"  User ID: {session_info.get('user_id', 'N/A')}")
+    else:
+        console.print(f"\n[bold cyan]Session Token[/bold cyan]")
+        console.print(f"  Status: [dim]Not available[/dim]")
+        console.print(f"  [dim]Run 'ghl auth quick' to capture[/dim]")
+
+    # Summary
+    has_auth = oauth_info or session_info
+    if has_auth:
+        console.print(f"\n[green]API access: Ready[/green]")
+    else:
+        console.print(f"\n[red]API access: Not authenticated[/red]")
+        console.print("[dim]Run 'ghl oauth connect' (recommended) or 'ghl auth quick'[/dim]")
+
+
+@auth_app.command("clear")
+def auth_clear(
+    oauth_only: bool = typer.Option(False, "--oauth", help="Clear only OAuth tokens"),
+    session_only: bool = typer.Option(False, "--session", help="Clear only session tokens"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+):
+    """Clear stored authentication tokens."""
+    from .auth import TokenManager
+
+    if not force:
+        if oauth_only:
+            msg = "Clear OAuth tokens?"
+        elif session_only:
+            msg = "Clear session token?"
+        else:
+            msg = "Clear all authentication tokens?"
+
+        if not typer.confirm(msg):
+            console.print("[yellow]Cancelled[/yellow]")
+            raise typer.Exit(0)
+
+    manager = TokenManager()
+
+    if oauth_only:
+        manager.storage.clear_oauth()
+        console.print("[green]OAuth tokens cleared[/green]")
+    elif session_only:
+        manager.storage.clear_session()
+        console.print("[green]Session token cleared[/green]")
+    else:
+        manager.clear_all()
+        console.print("[green]All tokens cleared[/green]")
+
+
+# OAuth sub-commands
+
+@oauth_app.command("setup")
+def oauth_setup(
+    client_id: str = typer.Option(None, "--client-id", "-c", help="OAuth Client ID"),
+    client_secret: str = typer.Option(None, "--client-secret", "-s", help="OAuth Client Secret"),
+    redirect_uri: str = typer.Option(
+        "http://localhost:3000/callback",
+        "--redirect-uri", "-r",
+        help="OAuth redirect URI",
+    ),
+    scopes: str = typer.Option(
+        None,
+        "--scopes",
+        help="Comma-separated scopes (e.g., contacts.readonly,contacts.write)",
+    ),
+):
+    """Configure OAuth client credentials for GHL Marketplace App.
+
+    You can get client credentials by creating a Private App in the
+    GHL Marketplace: https://marketplace.gohighlevel.com/
+
+    If not provided via options, you'll be prompted to enter them.
+    """
+    from .oauth import TokenStorage, OAuthConfig
+
+    # Interactive prompts if not provided
+    if not client_id:
+        console.print(
+            Panel(
+                "[bold]GHL Marketplace OAuth Setup[/bold]\n\n"
+                "You'll need a Private App from the GHL Marketplace.\n"
+                "Go to: https://marketplace.gohighlevel.com/\n\n"
+                "1. Click 'My Apps' → 'Create App'\n"
+                "2. Choose 'Private' distribution\n"
+                "3. Configure scopes for your use case\n"
+                "4. Copy the Client ID and Client Secret",
+                title="OAuth Setup",
+            )
+        )
+        client_id = typer.prompt("Client ID")
+
+    if not client_secret:
+        client_secret = typer.prompt("Client Secret", hide_input=True)
+
+    scope_list = [s.strip() for s in scopes.split(",")] if scopes else []
+
+    # Save config
+    storage = TokenStorage()
+    config = OAuthConfig(
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=redirect_uri,
+        scopes=scope_list,
+    )
+    storage.save_oauth_config(config)
+
+    console.print(
+        Panel(
+            f"[green]OAuth configuration saved![/green]\n\n"
+            f"Client ID: {client_id[:8]}...{client_id[-4:]}\n"
+            f"Redirect URI: {redirect_uri}\n"
+            f"Scopes: {', '.join(scope_list) if scope_list else 'All available'}\n\n"
+            "[dim]Run 'ghl oauth connect' to complete authentication[/dim]",
+            title="Setup Complete",
+        )
+    )
+
+
+@oauth_app.command("connect")
+def oauth_connect(
+    port: int = typer.Option(3000, "--port", "-p", help="Local server port for callback"),
+    timeout: int = typer.Option(300, "--timeout", "-t", help="Max seconds to wait"),
+):
+    """Start OAuth flow to connect your GHL account.
+
+    Opens a browser window where you'll authorize the app.
+    After authorization, tokens are stored for API access.
+    """
+    from .oauth import OAuthClient, TokenStorage, run_oauth_flow, OAuthError
+
+    storage = TokenStorage()
+
+    if not storage.has_oauth_config():
+        console.print("[red]OAuth not configured. Run 'ghl oauth setup' first.[/red]")
+        raise typer.Exit(1)
+
+    try:
+        client = OAuthClient.from_config(storage)
+
+        console.print(
+            Panel(
+                "[bold]Starting OAuth Authorization[/bold]\n\n"
+                "A browser window will open for you to authorize the app.\n"
+                "After authorization, you'll be redirected back.\n\n"
+                f"Listening on: http://localhost:{port}/callback",
+                title="OAuth Connect",
+            )
+        )
+
+        tokens = asyncio.run(run_oauth_flow(
+            client=client,
+            storage=storage,
+            port=port,
+            timeout=timeout,
+        ))
+
+        console.print(
+            Panel(
+                f"[bold green]Authorization successful![/bold green]\n\n"
+                f"Access Token: Valid for 24 hours\n"
+                f"Refresh Token: Valid for 1 year\n"
+                f"Company ID: {tokens.company_id or 'N/A'}\n"
+                f"Location ID: {tokens.location_id or 'N/A'}\n\n"
+                "[dim]Tokens will auto-refresh when needed.[/dim]",
+                title="Connected",
+            )
+        )
+
+    except OAuthError as e:
+        console.print(f"[red]OAuth error: {e}[/red]")
+        if e.details:
+            console.print(f"[dim]Details: {e.details}[/dim]")
+        raise typer.Exit(1)
+    except TimeoutError:
+        console.print("[red]Authorization timed out. Please try again.[/red]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@oauth_app.command("status")
+def oauth_status():
+    """Show OAuth token status."""
+    from .oauth import TokenStorage
+
+    storage = TokenStorage()
+    status = storage.get_status()
+
+    if not status.get("oauth_configured"):
+        console.print("[yellow]OAuth not configured. Run 'ghl oauth setup' first.[/yellow]")
+        return
+
+    oauth_info = status.get("oauth_token")
+    if not oauth_info:
+        console.print("[yellow]No OAuth token. Run 'ghl oauth connect' to authenticate.[/yellow]")
+        return
+
+    if oauth_info["valid"]:
+        expires_in = oauth_info["expires_in_seconds"]
+        hours = expires_in // 3600
+        minutes = (expires_in % 3600) // 60
+
+        console.print(
+            Panel(
+                f"[bold green]OAuth Token Valid[/bold green]\n\n"
+                f"Expires in: {hours}h {minutes}m\n"
+                f"Company ID: {oauth_info.get('company_id', 'N/A')}\n"
+                f"Location ID: {oauth_info.get('location_id', 'N/A')}\n"
+                f"Scope: {oauth_info.get('scope', 'N/A')}",
+                title="OAuth Status",
+            )
+        )
+    else:
+        console.print(
+            Panel(
+                "[bold yellow]OAuth Token Expired[/bold yellow]\n\n"
+                "The token will be automatically refreshed on next API call.\n"
+                "Or run 'ghl oauth refresh' to refresh now.",
+                title="OAuth Status",
+            )
+        )
+
+
+@oauth_app.command("refresh")
+def oauth_refresh():
+    """Force refresh OAuth access token."""
+    from .oauth import OAuthClient, TokenStorage, OAuthError
+
+    storage = TokenStorage()
+    data = storage.load()
+
+    if not data.oauth:
+        console.print("[red]No OAuth token to refresh. Run 'ghl oauth connect' first.[/red]")
+        raise typer.Exit(1)
+
+    try:
+        client = OAuthClient.from_config(storage)
+
+        console.print("[dim]Refreshing token...[/dim]")
+        tokens = asyncio.run(client.refresh_tokens(data.oauth.refresh_token))
+
+        storage.save_oauth_tokens(tokens.to_storage_data())
+
+        expires_in = tokens.expires_in
+        hours = expires_in // 3600
+        minutes = (expires_in % 3600) // 60
+
+        console.print(f"[green]Token refreshed! Valid for {hours}h {minutes}m[/green]")
+
+    except OAuthError as e:
+        console.print(f"[red]Refresh failed: {e}[/red]")
+        console.print("[dim]You may need to run 'ghl oauth connect' again.[/dim]")
+        raise typer.Exit(1)
+
+
+@oauth_app.command("revoke")
+def oauth_revoke(
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+):
+    """Revoke OAuth tokens and disconnect app."""
+    from .oauth import TokenStorage
+
+    if not force:
+        if not typer.confirm("Revoke OAuth tokens and disconnect?"):
+            console.print("[yellow]Cancelled[/yellow]")
+            raise typer.Exit(0)
+
+    storage = TokenStorage()
+    storage.clear_oauth()
+
+    console.print("[green]OAuth tokens revoked.[/green]")
+    console.print("[dim]Run 'ghl oauth connect' to reconnect.[/dim]")
 
 
 # ============================================================================

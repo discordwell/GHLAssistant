@@ -1,10 +1,10 @@
 """GHL API client module.
 
-Usage:
+Usage with TokenManager (recommended - supports OAuth with auto-refresh):
     from ghl_assistant.api import GHLClient
 
     async with GHLClient.from_session() as ghl:
-        # Contacts
+        # Automatically uses OAuth if available, falls back to session token
         contacts = await ghl.contacts.list()
         contact = await ghl.contacts.create(first_name="John", email="j@example.com")
 
@@ -15,6 +15,12 @@ Usage:
         calendars = await ghl.calendars.list()
 
         # And more...
+
+For direct TokenManager access:
+    from ghl_assistant.auth import TokenManager
+
+    manager = TokenManager()
+    token = await manager.get_token()  # Gets valid token, auto-refreshes OAuth
 """
 
 from .client import GHLClient, GHLConfig

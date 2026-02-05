@@ -1,13 +1,17 @@
 """GHL API Client - Typed wrapper for GoHighLevel backend API.
 
 Based on reverse-engineered endpoints from browser traffic capture.
+
+Supports two authentication methods:
+1. OAuth via TokenManager (recommended for production)
+2. Session tokens from browser capture (for development)
 """
 
 from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
@@ -29,6 +33,7 @@ if TYPE_CHECKING:
     from .conversation_ai import ConversationAIAPI
     from .voice_ai import VoiceAIAPI
     from .agency import AgencyAPI
+    from ..auth.manager import TokenManager
 
 
 @dataclass
@@ -45,6 +50,9 @@ class GHLConfig:
         """Load config from a captured session file.
 
         If no filepath provided, uses the most recent session.
+
+        Note: Consider using GHLClient.from_token_manager() instead,
+        which supports both OAuth and session tokens with auto-refresh.
         """
         if filepath is None:
             # Find most recent session
@@ -52,7 +60,7 @@ class GHLConfig:
             sessions = sorted(log_dir.glob("session_*.json"))
             if not sessions:
                 raise FileNotFoundError(
-                    "No session files found. Run 'ghl auth login' first."
+                    "No session files found. Run 'ghl auth quick' first."
                 )
             filepath = sessions[-1]
 
@@ -92,6 +100,31 @@ class GHLConfig:
             location_id=location_id,
         )
 
+    @classmethod
+    async def from_token_manager(cls, manager: "TokenManager" = None) -> "GHLConfig":
+        """Load config from TokenManager (OAuth or session).
+
+        This is the preferred method as it supports auto-refresh for OAuth tokens.
+
+        Args:
+            manager: TokenManager instance (uses default if not provided)
+
+        Returns:
+            GHLConfig with valid token
+        """
+        if manager is None:
+            from ..auth.manager import TokenManager
+            manager = TokenManager()
+
+        token_info = await manager.get_token_info()
+
+        return cls(
+            token=token_info.token,
+            user_id=token_info.user_id,
+            company_id=token_info.company_id,
+            location_id=token_info.location_id,
+        )
+
     def to_dict(self) -> dict[str, Any]:
         """Export config as dictionary."""
         return {
@@ -105,14 +138,16 @@ class GHLConfig:
 class GHLClient:
     """GoHighLevel API client with domain-specific sub-APIs.
 
-    Usage:
-        async with GHLClient.from_session() as ghl:
-            # Domain-specific APIs
+    Usage with TokenManager (recommended):
+        async with GHLClient.from_token_manager() as ghl:
             contacts = await ghl.contacts.list()
-            contact = await ghl.contacts.create(first_name="John", email="j@example.com")
 
-            workflows = await ghl.workflows.list()
-            calendars = await ghl.calendars.list()
+    Usage with session file (legacy):
+        async with GHLClient.from_session() as ghl:
+            contacts = await ghl.contacts.list()
+
+    The TokenManager approach supports both OAuth tokens (with auto-refresh)
+    and session tokens, choosing the best available option automatically.
     """
 
     BASE_URL = "https://backend.leadconnectorhq.com"
@@ -123,8 +158,15 @@ class GHLClient:
         "source": "WEB_USER",
     }
 
-    def __init__(self, config: GHLConfig):
+    def __init__(self, config: GHLConfig, token_manager: "TokenManager" = None):
+        """Initialize GHL client.
+
+        Args:
+            config: GHLConfig with token and IDs
+            token_manager: Optional TokenManager for auto-refresh (OAuth)
+        """
         self.config = config
+        self._token_manager = token_manager
         self._client: httpx.AsyncClient | None = None
 
         # Domain APIs (initialized on enter)
@@ -146,11 +188,90 @@ class GHLClient:
 
     @classmethod
     def from_session(cls, filepath: str | Path | None = None) -> "GHLClient":
-        """Create client from session file."""
-        config = GHLConfig.from_session_file(filepath)
+        """Create client from available tokens (OAuth or session).
+
+        This method first tries to use TokenManager (which supports OAuth
+        with auto-refresh). If no tokens are available in TokenManager,
+        it falls back to loading from session files.
+
+        Args:
+            filepath: Optional path to session file (bypasses TokenManager)
+
+        Returns:
+            GHLClient ready for API calls
+        """
+        # If explicit filepath provided, use session file directly
+        if filepath:
+            config = GHLConfig.from_session_file(filepath)
+            return cls(config)
+
+        # Try TokenManager first (sync check for any token)
+        from ..auth.manager import TokenManager
+        manager = TokenManager()
+
+        if manager.has_valid_token():
+            # Use a wrapper that will initialize with TokenManager
+            # We can't do async in a classmethod, so we defer to __aenter__
+            return cls._create_with_manager(manager)
+
+        # Fall back to session file
+        config = GHLConfig.from_session_file()
         return cls(config)
 
+    @classmethod
+    def _create_with_manager(cls, manager: "TokenManager") -> "GHLClient":
+        """Create a client that will initialize with TokenManager in __aenter__."""
+        # Create with placeholder config - will be replaced in __aenter__
+        placeholder = GHLConfig(token="__pending__")
+        client = cls(placeholder, token_manager=manager)
+        client._needs_token_init = True
+        return client
+
+    @classmethod
+    async def from_token_manager(cls, manager: "TokenManager" = None) -> "GHLClient":
+        """Create client from TokenManager (recommended).
+
+        Supports both OAuth (with auto-refresh) and session tokens.
+
+        Args:
+            manager: TokenManager instance (uses default if not provided)
+
+        Returns:
+            GHLClient ready for API calls
+        """
+        if manager is None:
+            from ..auth.manager import TokenManager
+            manager = TokenManager()
+
+        config = await GHLConfig.from_token_manager(manager)
+        return cls(config, token_manager=manager)
+
+    async def _refresh_token_if_needed(self) -> None:
+        """Refresh token if using TokenManager and token is expired."""
+        if not self._token_manager:
+            return
+
+        # Get fresh token info (auto-refreshes OAuth if needed)
+        token_info = await self._token_manager.get_token_info()
+
+        # Update config and client headers if token changed
+        if token_info.token != self.config.token:
+            self.config.token = token_info.token
+            if self._client:
+                self._client.headers["Authorization"] = f"Bearer {token_info.token}"
+
     async def __aenter__(self) -> "GHLClient":
+        # Handle deferred token initialization from from_session()
+        if getattr(self, "_needs_token_init", False) and self._token_manager:
+            token_info = await self._token_manager.get_token_info()
+            self.config = GHLConfig(
+                token=token_info.token,
+                user_id=token_info.user_id,
+                company_id=token_info.company_id,
+                location_id=token_info.location_id,
+            )
+            self._needs_token_init = False
+
         self._client = httpx.AsyncClient(
             base_url=self.BASE_URL,
             timeout=30.0,
@@ -319,30 +440,35 @@ class GHLClient:
     # HTTP methods
     async def _get(self, endpoint: str, **params) -> dict[str, Any]:
         """Make GET request."""
+        await self._refresh_token_if_needed()
         resp = await self._client.get(endpoint, params=params)
         resp.raise_for_status()
         return resp.json()
 
     async def _post(self, endpoint: str, data: dict | None = None) -> dict[str, Any]:
         """Make POST request."""
+        await self._refresh_token_if_needed()
         resp = await self._client.post(endpoint, json=data)
         resp.raise_for_status()
         return resp.json()
 
     async def _put(self, endpoint: str, data: dict | None = None) -> dict[str, Any]:
         """Make PUT request."""
+        await self._refresh_token_if_needed()
         resp = await self._client.put(endpoint, json=data)
         resp.raise_for_status()
         return resp.json()
 
     async def _delete(self, endpoint: str) -> dict[str, Any]:
         """Make DELETE request."""
+        await self._refresh_token_if_needed()
         resp = await self._client.delete(endpoint)
         resp.raise_for_status()
         return resp.json()
 
     async def _patch(self, endpoint: str, data: dict | None = None) -> dict[str, Any]:
         """Make PATCH request (used by Voice AI)."""
+        await self._refresh_token_if_needed()
         resp = await self._client.patch(endpoint, json=data)
         resp.raise_for_status()
         return resp.json()
