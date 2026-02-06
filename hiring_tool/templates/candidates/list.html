@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Candidates — Hiring Tool{% endblock %}
+{% block nav_candidates %}active{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold text-gray-900">Candidates</h1>
+    <a href="/candidates/new" class="inline-flex items-center px-3 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700">
+        + Add Candidate
+    </a>
+</div>
+
+<form method="get" action="/candidates/" class="flex items-center space-x-3 mb-4">
+    <input type="text" name="search" value="{{ search }}" placeholder="Search by name or email..."
+           class="flex-1 rounded-md border-gray-300 shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm border px-3 py-2">
+    <select name="status" class="rounded-md border-gray-300 text-sm py-2 px-3 bg-white border">
+        <option value="">All Statuses</option>
+        <option value="active" {% if selected_status == "active" %}selected{% endif %}>Active</option>
+        <option value="hired" {% if selected_status == "hired" %}selected{% endif %}>Hired</option>
+        <option value="rejected" {% if selected_status == "rejected" %}selected{% endif %}>Rejected</option>
+        <option value="withdrawn" {% if selected_status == "withdrawn" %}selected{% endif %}>Withdrawn</option>
+    </select>
+    <select name="position_id" class="rounded-md border-gray-300 text-sm py-2 px-3 bg-white border">
+        <option value="">All Positions</option>
+        {% for p in positions %}
+        <option value="{{ p.id }}" {% if selected_position_id == p.id %}selected{% endif %}>{{ p.title }}</option>
+        {% endfor %}
+    </select>
+    <button type="submit" class="px-4 py-2 bg-gray-100 text-gray-700 text-sm rounded-md hover:bg-gray-200 border border-gray-300">Filter</button>
+</form>
+
+<div class="bg-white shadow rounded-lg overflow-hidden">
+    <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+            <tr>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Stage</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Score</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Applied</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+            {% for c in candidates %}
+            <tr class="hover:bg-gray-50 cursor-pointer" onclick="window.location='/candidates/{{ c.id }}'">
+                <td class="px-4 py-3 text-sm font-medium text-gray-900">{{ c.first_name }} {{ c.last_name }}</td>
+                <td class="px-4 py-3 text-sm text-gray-500">{{ c.email or "—" }}</td>
+                <td class="px-4 py-3 text-sm text-gray-500">{{ c.stage }}</td>
+                <td class="px-4 py-3 text-sm">
+                    {% set score = c.score %}
+                    {% include "partials/score_badge.html" %}
+                </td>
+                <td class="px-4 py-3 text-sm">
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
+                        {% if c.status == 'active' %}bg-blue-100 text-blue-700
+                        {% elif c.status == 'hired' %}bg-green-100 text-green-700
+                        {% elif c.status == 'rejected' %}bg-red-100 text-red-700
+                        {% else %}bg-gray-100 text-gray-700{% endif %}">
+                        {{ c.status }}
+                    </span>
+                </td>
+                <td class="px-4 py-3 text-sm text-gray-400">{{ c.applied_at.strftime('%b %d, %Y') }}</td>
+            </tr>
+            {% endfor %}
+            {% if not candidates %}
+            <tr>
+                <td colspan="6" class="px-4 py-8 text-center text-gray-400 text-sm">No candidates found.</td>
+            </tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

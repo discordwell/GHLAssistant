@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}Analytics — Hiring Tool{% endblock %}
+{% block nav_analytics %}active{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-bold text-gray-900 mb-6">Hiring Analytics</h1>
+
+<!-- Summary cards -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+    <div class="bg-white shadow rounded-lg p-4 text-center">
+        <p class="text-3xl font-bold text-gray-900">{{ metrics.total_candidates }}</p>
+        <p class="text-xs text-gray-500 mt-1">Total Candidates</p>
+    </div>
+    <div class="bg-white shadow rounded-lg p-4 text-center">
+        <p class="text-3xl font-bold text-blue-600">{{ metrics.active_count }}</p>
+        <p class="text-xs text-gray-500 mt-1">Active</p>
+    </div>
+    <div class="bg-white shadow rounded-lg p-4 text-center">
+        <p class="text-3xl font-bold text-green-600">{{ metrics.hired_count }}</p>
+        <p class="text-xs text-gray-500 mt-1">Hired</p>
+    </div>
+    <div class="bg-white shadow rounded-lg p-4 text-center">
+        <p class="text-3xl font-bold text-red-600">{{ metrics.rejected_count }}</p>
+        <p class="text-xs text-gray-500 mt-1">Rejected</p>
+    </div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <!-- Time to hire -->
+    <div class="bg-white shadow rounded-lg p-4">
+        <h3 class="text-sm font-semibold text-gray-700 mb-3">Time to Hire</h3>
+        {% if metrics.avg_time_to_hire %}
+        <p class="text-2xl font-bold text-gray-900">{{ metrics.avg_time_to_hire }} days</p>
+        <p class="text-xs text-gray-400 mt-1">average from application to hire</p>
+        {% else %}
+        <p class="text-sm text-gray-400">No data yet</p>
+        {% endif %}
+    </div>
+
+    <!-- Open positions -->
+    <div class="bg-white shadow rounded-lg p-4">
+        <h3 class="text-sm font-semibold text-gray-700 mb-3">Open Positions</h3>
+        <p class="text-2xl font-bold text-gray-900">{{ metrics.open_positions }}</p>
+        <p class="text-xs text-gray-400 mt-1">positions currently accepting candidates</p>
+    </div>
+
+    <!-- Stage distribution -->
+    <div class="bg-white shadow rounded-lg p-4">
+        <h3 class="text-sm font-semibold text-gray-700 mb-3">Pipeline Distribution</h3>
+        <div class="space-y-2">
+            {% for stage, count in metrics.stage_counts.items() %}
+            {% if count > 0 %}
+            <div class="flex items-center justify-between">
+                <span class="text-sm text-gray-600">{{ stage }}</span>
+                <div class="flex items-center space-x-2">
+                    <div class="w-32 bg-gray-100 rounded-full h-2">
+                        {% set max_count = metrics.stage_counts.values()|max %}
+                        <div class="bg-indigo-500 h-2 rounded-full" style="width: {{ (count / max_count * 100) if max_count > 0 else 0 }}%"></div>
+                    </div>
+                    <span class="text-sm font-medium text-gray-700 w-8 text-right">{{ count }}</span>
+                </div>
+            </div>
+            {% endif %}
+            {% endfor %}
+            {% if not metrics.stage_counts.values()|select('gt', 0)|list %}
+            <p class="text-sm text-gray-400">No active candidates</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Average time per stage -->
+    <div class="bg-white shadow rounded-lg p-4">
+        <h3 class="text-sm font-semibold text-gray-700 mb-3">Avg. Days per Stage</h3>
+        {% if metrics.avg_stage_times %}
+        <div class="space-y-2">
+            {% for stage, days in metrics.avg_stage_times.items() %}
+            <div class="flex items-center justify-between">
+                <span class="text-sm text-gray-600">{{ stage }}</span>
+                <span class="text-sm font-medium text-gray-700">{{ days }} days</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-sm text-gray-400">Not enough data</p>
+        {% endif %}
+    </div>
+
+    <!-- Source effectiveness -->
+    <div class="bg-white shadow rounded-lg p-4">
+        <h3 class="text-sm font-semibold text-gray-700 mb-3">Source Effectiveness</h3>
+        {% if metrics.source_counts %}
+        <div class="space-y-2">
+            {% for source, data in metrics.source_counts.items() %}
+            <div class="flex items-center justify-between">
+                <span class="text-sm text-gray-600">{{ source }}</span>
+                <div class="text-sm">
+                    <span class="text-gray-700 font-medium">{{ data.total }}</span>
+                    <span class="text-gray-400">total</span>
+                    {% if data.hired > 0 %}
+                    · <span class="text-green-600 font-medium">{{ data.hired }}</span>
+                    <span class="text-gray-400">hired</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-sm text-gray-400">No data yet</p>
+        {% endif %}
+    </div>
+
+    <!-- Pass-through rates -->
+    <div class="bg-white shadow rounded-lg p-4">
+        <h3 class="text-sm font-semibold text-gray-700 mb-3">Stage Pass-through Rates</h3>
+        {% if metrics.pass_through %}
+        <div class="space-y-2">
+            {% for transition, rate in metrics.pass_through.items() %}
+            <div class="flex items-center justify-between">
+                <span class="text-sm text-gray-600">{{ transition }}</span>
+                <span class="text-sm font-medium text-gray-700">{{ rate }}%</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-sm text-gray-400">Not enough data</p>
+        {% endif %}
+    </div>
+
+    <!-- Per-position stats -->
+    {% if metrics.position_stats %}
+    <div class="bg-white shadow rounded-lg p-4 md:col-span-2">
+        <h3 class="text-sm font-semibold text-gray-700 mb-3">By Position</h3>
+        <table class="min-w-full text-sm">
+            <thead>
+                <tr class="text-left text-xs text-gray-500 uppercase">
+                    <th class="pb-2">Position</th>
+                    <th class="pb-2">Status</th>
+                    <th class="pb-2 text-right">Total</th>
+                    <th class="pb-2 text-right">Active</th>
+                    <th class="pb-2 text-right">Hired</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+                {% for ps in metrics.position_stats %}
+                <tr>
+                    <td class="py-1.5 font-medium text-gray-900">{{ ps.title }}</td>
+                    <td class="py-1.5 text-gray-500">{{ ps.status }}</td>
+                    <td class="py-1.5 text-right text-gray-700">{{ ps.total }}</td>
+                    <td class="py-1.5 text-right text-blue-600">{{ ps.active }}</td>
+                    <td class="py-1.5 text-right text-green-600">{{ ps.hired }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

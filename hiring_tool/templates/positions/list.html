@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Positions — Hiring Tool{% endblock %}
+{% block nav_positions %}active{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold text-gray-900">Positions</h1>
+    <a href="/positions/new" class="inline-flex items-center px-3 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700">
+        + Add Position
+    </a>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    {% for pos in positions %}
+    <div class="bg-white shadow rounded-lg p-4 hover:shadow-md transition-shadow">
+        <div class="flex items-start justify-between">
+            <div>
+                <h3 class="text-sm font-semibold text-gray-900">{{ pos.title }}</h3>
+                {% if pos.department %}
+                <p class="text-xs text-gray-500">{{ pos.department }}</p>
+                {% endif %}
+            </div>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
+                {% if pos.status == 'open' %}bg-green-100 text-green-700
+                {% elif pos.status == 'paused' %}bg-yellow-100 text-yellow-700
+                {% elif pos.status == 'filled' %}bg-blue-100 text-blue-700
+                {% else %}bg-gray-100 text-gray-700{% endif %}">
+                {{ pos.status }}
+            </span>
+        </div>
+
+        {% if pos.salary_min or pos.salary_max %}
+        <p class="text-xs text-gray-400 mt-2">
+            {% if pos.salary_min and pos.salary_max %}
+            ${{ "{:,.0f}".format(pos.salary_min) }} – ${{ "{:,.0f}".format(pos.salary_max) }}
+            {% elif pos.salary_min %}
+            From ${{ "{:,.0f}".format(pos.salary_min) }}
+            {% else %}
+            Up to ${{ "{:,.0f}".format(pos.salary_max) }}
+            {% endif %}
+        </p>
+        {% endif %}
+
+        <div class="flex items-center justify-between mt-3 pt-3 border-t border-gray-100">
+            <span class="text-xs text-gray-400">{{ counts.get(pos.id, 0) }} active candidates</span>
+            <a href="/positions/{{ pos.id }}/edit" class="text-xs text-indigo-600 hover:underline">Edit</a>
+        </div>
+    </div>
+    {% endfor %}
+
+    {% if not positions %}
+    <div class="col-span-full text-center py-12 text-gray-400">
+        <p>No positions yet.</p>
+        <a href="/positions/new" class="text-indigo-600 hover:underline text-sm mt-1 inline-block">Create your first position</a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

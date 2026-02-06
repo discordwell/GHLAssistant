@@ -3261,6 +3261,22 @@ def hiring_audit(
         )
 
 
+@hiring_app.command("serve")
+def hiring_serve(
+    port: int = typer.Option(8000, "--port", "-p", help="Port to run on"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to"),
+):
+    """Launch the hiring tool web UI."""
+    try:
+        import uvicorn
+    except ImportError:
+        console.print("[red]Missing dependencies. Install with: pip install -e '.[hiring]'[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[bold cyan]Starting Hiring Tool at http://{host}:{port}[/bold cyan]")
+    uvicorn.run("hiring_tool.app:app", host=host, port=port, reload=True)
+
+
 # ============================================================================
 # Blueprint Commands (snapshot / provision / audit / bulk)
 # ============================================================================

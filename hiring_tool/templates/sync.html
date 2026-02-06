@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}GHL Sync — Hiring Tool{% endblock %}
+{% block nav_sync %}active{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-bold text-gray-900 mb-6">GHL Sync</h1>
+
+{% if message is defined and message %}
+<div class="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded-lg mb-4 text-sm">
+    {{ message }}
+</div>
+{% endif %}
+
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+    <div class="bg-white shadow rounded-lg p-4 text-center">
+        <p class="text-3xl font-bold text-gray-900">{{ synced_count }}</p>
+        <p class="text-xs text-gray-500 mt-1">Synced with GHL</p>
+    </div>
+    <div class="bg-white shadow rounded-lg p-4 text-center">
+        <p class="text-3xl font-bold text-gray-900">{{ total_count }}</p>
+        <p class="text-xs text-gray-500 mt-1">Total Candidates</p>
+    </div>
+    <div class="bg-white shadow rounded-lg p-4 text-center">
+        <p class="text-3xl font-bold text-gray-900">{{ total_count - synced_count }}</p>
+        <p class="text-xs text-gray-500 mt-1">Local Only</p>
+    </div>
+</div>
+
+<div class="flex space-x-3 mb-6">
+    <form method="post" action="/sync/push">
+        <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700">
+            Push to GHL
+        </button>
+    </form>
+    <form method="post" action="/sync/pull">
+        <button type="submit" class="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700">
+            Pull from GHL
+        </button>
+    </form>
+</div>
+
+{% if recent_syncs %}
+<div class="bg-white shadow rounded-lg p-4">
+    <h3 class="text-sm font-semibold text-gray-700 mb-3">Recent Sync Activity</h3>
+    <div class="space-y-2">
+        {% for sync in recent_syncs %}
+        <div class="flex items-center justify-between py-1 border-b border-gray-100 last:border-0">
+            <span class="text-sm text-gray-700">{{ sync.description }}</span>
+            <span class="text-xs text-gray-400">{{ sync.created_at.strftime('%b %d, %H:%M') }}</span>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+{% endblock %}

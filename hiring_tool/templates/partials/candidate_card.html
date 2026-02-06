@@ -1,0 +1,22 @@
+{% if candidate %}
+<div class="kanban-card" data-id="{{ candidate.id }}" id="card-{{ candidate.id }}">
+    <a href="/candidates/{{ candidate.id }}" class="block">
+        <div class="flex items-start justify-between">
+            <span class="font-medium text-sm text-gray-900">{{ candidate.first_name }} {{ candidate.last_name }}</span>
+            {% include "partials/score_badge.html" with context %}
+        </div>
+        {% if candidate.position_id %}
+        <p class="text-xs text-gray-500 mt-1 truncate">Position #{{ candidate.position_id }}</p>
+        {% endif %}
+        {% if candidate.source %}
+        <p class="text-xs text-gray-400 mt-0.5">via {{ candidate.source }}</p>
+        {% endif %}
+        <div class="flex items-center justify-between mt-2">
+            <span class="text-xs text-gray-400">{{ candidate.applied_at.strftime('%b %d') }}</span>
+            {% if candidate.email %}
+            <span class="text-xs text-gray-400 truncate ml-2">{{ candidate.email }}</span>
+            {% endif %}
+        </div>
+    </a>
+</div>
+{% endif %}

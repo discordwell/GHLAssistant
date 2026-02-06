@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}{% if candidate %}Edit{% else %}New{% endif %} Candidate — Hiring Tool{% endblock %}
+{% block nav_candidates %}active{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <h1 class="text-xl font-bold text-gray-900 mb-6">{% if candidate %}Edit Candidate{% else %}Add Candidate{% endif %}</h1>
+
+    <form method="post" action="{% if candidate %}/candidates/{{ candidate.id }}/edit{% else %}/candidates/new{% endif %}" class="space-y-4">
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700">First Name</label>
+                <input type="text" name="first_name" value="{{ candidate.first_name if candidate else '' }}" required
+                       class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm border px-3 py-2">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Last Name</label>
+                <input type="text" name="last_name" value="{{ candidate.last_name if candidate else '' }}" required
+                       class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm border px-3 py-2">
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Email</label>
+                <input type="email" name="email" value="{{ candidate.email if candidate and candidate.email else '' }}"
+                       class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm border px-3 py-2">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Phone</label>
+                <input type="tel" name="phone" value="{{ candidate.phone if candidate and candidate.phone else '' }}"
+                       class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm border px-3 py-2">
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Position</label>
+                <select name="position_id" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm border px-3 py-2">
+                    <option value="">— None —</option>
+                    {% for p in positions %}
+                    <option value="{{ p.id }}" {% if candidate and candidate.position_id == p.id %}selected{% endif %}>{{ p.title }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Stage</label>
+                <select name="stage" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm border px-3 py-2">
+                    {% for s in stages %}
+                    <option value="{{ s }}" {% if candidate and candidate.stage == s %}selected{% endif %}>{{ s }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Source</label>
+                <input type="text" name="source" value="{{ candidate.source if candidate and candidate.source else '' }}" placeholder="e.g., LinkedIn, Referral"
+                       class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm border px-3 py-2">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Desired Salary</label>
+                <input type="number" name="desired_salary" value="{{ candidate.desired_salary if candidate and candidate.desired_salary else '' }}" step="1000"
+                       class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm border px-3 py-2">
+            </div>
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700">Resume URL</label>
+            <input type="url" name="resume_url" value="{{ candidate.resume_url if candidate and candidate.resume_url else '' }}"
+                   class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm border px-3 py-2">
+        </div>
+
+        {% if candidate %}
+        <div>
+            <label class="block text-sm font-medium text-gray-700">Status</label>
+            <select name="status" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm border px-3 py-2">
+                <option value="active" {% if candidate.status == "active" %}selected{% endif %}>Active</option>
+                <option value="hired" {% if candidate.status == "hired" %}selected{% endif %}>Hired</option>
+                <option value="rejected" {% if candidate.status == "rejected" %}selected{% endif %}>Rejected</option>
+                <option value="withdrawn" {% if candidate.status == "withdrawn" %}selected{% endif %}>Withdrawn</option>
+            </select>
+        </div>
+        {% endif %}
+
+        <div class="flex justify-end space-x-3 pt-4">
+            <a href="{% if candidate %}/candidates/{{ candidate.id }}{% else %}/candidates/{% endif %}" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Cancel</a>
+            <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700">{% if candidate %}Save{% else %}Create{% endif %}</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

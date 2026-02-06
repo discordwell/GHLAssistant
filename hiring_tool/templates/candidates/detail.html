@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block title %}{{ candidate.first_name }} {{ candidate.last_name }} — Hiring Tool{% endblock %}
+{% block nav_candidates %}active{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <div class="flex items-center justify-between">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">{{ candidate.first_name }} {{ candidate.last_name }}</h1>
+            <div class="flex items-center space-x-3 mt-1">
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                    {% if candidate.status == 'active' %}bg-blue-100 text-blue-700
+                    {% elif candidate.status == 'hired' %}bg-green-100 text-green-700
+                    {% elif candidate.status == 'rejected' %}bg-red-100 text-red-700
+                    {% else %}bg-gray-100 text-gray-700{% endif %}">
+                    {{ candidate.status }}
+                </span>
+                <span class="text-sm text-gray-500">Stage: <strong>{{ candidate.stage }}</strong></span>
+                {% if candidate.score is not none %}
+                <span>{% include "partials/score_badge.html" %}</span>
+                {% endif %}
+            </div>
+        </div>
+        <div class="flex space-x-2">
+            <a href="/interviews/new/{{ candidate.id }}" class="px-3 py-1.5 bg-purple-600 text-white text-sm font-medium rounded-md hover:bg-purple-700">+ Interview</a>
+            <a href="/candidates/{{ candidate.id }}/edit" class="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-200 border border-gray-300">Edit</a>
+        </div>
+    </div>
+</div>
+
+<div class="grid grid-cols-3 gap-6">
+    <!-- Left column: info -->
+    <div class="col-span-1 space-y-4">
+        <div class="bg-white shadow rounded-lg p-4">
+            <h3 class="text-sm font-semibold text-gray-700 mb-3">Details</h3>
+            <dl class="space-y-2 text-sm">
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Email</dt>
+                    <dd class="text-gray-900">{{ candidate.email or "—" }}</dd>
+                </div>
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Phone</dt>
+                    <dd class="text-gray-900">{{ candidate.phone or "—" }}</dd>
+                </div>
+                {% if position %}
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Position</dt>
+                    <dd class="text-gray-900">{{ position.title }}</dd>
+                </div>
+                {% endif %}
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Source</dt>
+                    <dd class="text-gray-900">{{ candidate.source or "—" }}</dd>
+                </div>
+                {% if candidate.desired_salary %}
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Desired Salary</dt>
+                    <dd class="text-gray-900">${{ "{:,.0f}".format(candidate.desired_salary) }}</dd>
+                </div>
+                {% endif %}
+                {% if candidate.available_start %}
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Available</dt>
+                    <dd class="text-gray-900">{{ candidate.available_start.strftime('%b %d, %Y') }}</dd>
+                </div>
+                {% endif %}
+                {% if candidate.resume_url %}
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Resume</dt>
+                    <dd>{% if candidate.resume_url.startswith('http') %}<a href="{{ candidate.resume_url }}" target="_blank" class="text-indigo-600 hover:underline">View</a>{% else %}<span class="text-gray-400">Invalid URL</span>{% endif %}</dd>
+                </div>
+                {% endif %}
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Applied</dt>
+                    <dd class="text-gray-900">{{ candidate.applied_at.strftime('%b %d, %Y') }}</dd>
+                </div>
+                {% if candidate.ghl_contact_id %}
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">GHL ID</dt>
+                    <dd class="text-xs text-gray-400 font-mono truncate max-w-[120px]">{{ candidate.ghl_contact_id }}</dd>
+                </div>
+                {% endif %}
+            </dl>
+        </div>
+
+        <!-- Interview feedback summary -->
+        {% if feedbacks %}
+        <div class="bg-white shadow rounded-lg p-4">
+            <h3 class="text-sm font-semibold text-gray-700 mb-3">Interviews ({{ feedbacks|length }})</h3>
+            {% if avg_rating %}
+            <p class="text-sm text-gray-600 mb-3">Avg Rating: <strong>{{ "%.1f"|format(avg_rating) }}/5</strong></p>
+            {% endif %}
+            <div class="space-y-3">
+                {% for f in feedbacks %}
+                <div class="border-b border-gray-100 pb-2 last:border-0">
+                    <div class="flex justify-between text-sm">
+                        <span class="font-medium text-gray-700">{{ f.interviewer_name }}</span>
+                        <span class="text-gray-400">{{ f.interview_date.strftime('%b %d') }}</span>
+                    </div>
+                    <div class="flex items-center space-x-2 mt-1">
+                        <span class="text-xs px-1.5 py-0.5 rounded
+                            {% if f.recommendation in ('strong_hire', 'hire') %}bg-green-100 text-green-700
+                            {% elif f.recommendation == 'neutral' %}bg-yellow-100 text-yellow-700
+                            {% else %}bg-red-100 text-red-700{% endif %}">
+                            {{ f.recommendation.replace('_', ' ')|title }}
+                        </span>
+                        <span class="text-xs text-gray-400">{{ f.interview_type|title }} · {{ f.rating }}/5</span>
+                    </div>
+                    {% if f.strengths %}
+                    <p class="text-xs text-gray-500 mt-1"><strong>+</strong> {{ f.strengths[:100] }}{% if f.strengths|length > 100 %}...{% endif %}</p>
+                    {% endif %}
+                    {% if f.concerns %}
+                    <p class="text-xs text-gray-500"><strong>-</strong> {{ f.concerns[:100] }}{% if f.concerns|length > 100 %}...{% endif %}</p>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Right column: timeline + notes -->
+    <div class="col-span-2 space-y-4">
+        <!-- Add note -->
+        <div class="bg-white shadow rounded-lg p-4">
+            <h3 class="text-sm font-semibold text-gray-700 mb-3">Add Note</h3>
+            <form hx-post="/candidates/{{ candidate.id }}/note" hx-target="#timeline" hx-swap="innerHTML" class="flex space-x-2">
+                <input type="text" name="note" placeholder="Add a note..." required
+                       class="flex-1 rounded-md border-gray-300 shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm border px-3 py-2">
+                <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700">Add</button>
+            </form>
+        </div>
+
+        <!-- Activity timeline -->
+        <div class="bg-white shadow rounded-lg p-4">
+            <h3 class="text-sm font-semibold text-gray-700 mb-3">Activity Timeline</h3>
+            <div id="timeline">
+                {% include "partials/timeline_entry.html" %}
+            </div>
+            {% if not activities %}
+            <p class="text-sm text-gray-400">No activity yet.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

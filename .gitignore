@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 venv/
+.venv/
 .env
 
 # Node
@@ -15,6 +16,9 @@ dist/
 
 # OS
 .DS_Store
+
+# SQLite
+*.db
 
 # Browser data (contains cookies, tokens, sensitive info)
 data/browser_profiles/

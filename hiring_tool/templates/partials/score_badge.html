@@ -1,0 +1,9 @@
+{% set score = candidate.score if candidate is defined and candidate else score %}
+{% if score is not none %}
+<span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium
+    {% if score >= 70 %}bg-green-100 text-green-700
+    {% elif score >= 40 %}bg-yellow-100 text-yellow-700
+    {% else %}bg-red-100 text-red-700{% endif %}">
+    {{ score|round|int }}
+</span>
+{% endif %}

@@ -39,6 +39,11 @@ dev = [
     "pytest-mock>=3.12.0",
     "ruff>=0.1.0",
 ]
+hiring = [
+    "fastapi[standard]>=0.110.0",
+    "sqlmodel>=0.0.16",
+    "python-multipart>=0.0.7",
+]
 
 [project.scripts]
 ghl = "ghl_assistant.cli:app"

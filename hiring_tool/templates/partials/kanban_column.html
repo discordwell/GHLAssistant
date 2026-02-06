@@ -1,0 +1,9 @@
+<div class="kanban-column-header">
+    <span class="font-semibold text-gray-700 text-sm">{{ stage }}</span>
+    <span class="text-xs text-gray-400 bg-gray-100 rounded-full px-2 py-0.5">{{ candidates|length }}</span>
+</div>
+<div class="kanban-cards" id="stage-{{ stage|replace(' ', '-') }}" data-stage="{{ stage }}">
+    {% for candidate in candidates %}
+    {% include "partials/candidate_card.html" %}
+    {% endfor %}
+</div>

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Board — Hiring Tool{% endblock %}
+{% block nav_board %}active{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold text-gray-900">Hiring Board</h1>
+    <div class="flex items-center space-x-3">
+        <form method="get" action="/board" class="flex items-center space-x-2">
+            <select name="position_id" class="rounded-md border-gray-300 text-sm py-1.5 px-3 bg-white border focus:ring-indigo-500 focus:border-indigo-500"
+                    onchange="this.form.submit()">
+                <option value="">All Positions</option>
+                {% for p in positions %}
+                <option value="{{ p.id }}" {% if selected_position_id == p.id %}selected{% endif %}>{{ p.title }}</option>
+                {% endfor %}
+            </select>
+        </form>
+        <a href="/candidates/new" class="inline-flex items-center px-3 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700">
+            + Add Candidate
+        </a>
+    </div>
+</div>
+
+<div class="kanban-board" id="kanban-board">
+    {% for stage in stages %}
+    <div class="kanban-column">
+        <div class="kanban-column-header">
+            <span class="font-semibold text-gray-700 text-sm">{{ stage }}</span>
+            <span class="text-xs text-gray-400 bg-gray-100 rounded-full px-2 py-0.5">{{ columns[stage]|length }}</span>
+        </div>
+        <div class="kanban-cards" id="stage-{{ stage|replace(' ', '-') }}" data-stage="{{ stage }}">
+            {% for candidate in columns[stage] %}
+            {% include "partials/candidate_card.html" %}
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/kanban.js"></script>
+{% endblock %}

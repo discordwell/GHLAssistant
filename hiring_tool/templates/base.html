@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-gray-50">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Hiring Tool{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
+    <link rel="stylesheet" href="/static/css/hiring.css">
+    {% block head %}{% endblock %}
+</head>
+<body class="h-full" hx-boost="true">
+    <nav class="bg-white border-b border-gray-200">
+        <div class="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-14">
+                <div class="flex items-center space-x-8">
+                    <a href="/" class="text-lg font-bold text-indigo-600">Hiring Tool</a>
+                    <a href="/" class="nav-link {% block nav_board %}{% endblock %}">Board</a>
+                    <a href="/candidates/" class="nav-link {% block nav_candidates %}{% endblock %}">Candidates</a>
+                    <a href="/positions/" class="nav-link {% block nav_positions %}{% endblock %}">Positions</a>
+                    <a href="/analytics/" class="nav-link {% block nav_analytics %}{% endblock %}">Analytics</a>
+                    <a href="/sync/" class="nav-link {% block nav_sync %}{% endblock %}">Sync</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+    <main class="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {% block content %}{% endblock %}
+    </main>
+    {% block scripts %}{% endblock %}
+</body>
+</html>
