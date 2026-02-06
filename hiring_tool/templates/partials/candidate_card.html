@@ -6,7 +6,7 @@
             {% include "partials/score_badge.html" with context %}
         </div>
         {% if candidate.position_id %}
-        <p class="text-xs text-gray-500 mt-1 truncate">Position #{{ candidate.position_id }}</p>
+        <p class="text-xs text-gray-500 mt-1 truncate">{% if position_map is defined and candidate.position_id in position_map %}{{ position_map[candidate.position_id] }}{% else %}Position #{{ candidate.position_id }}{% endif %}</p>
         {% endif %}
         {% if candidate.source %}
         <p class="text-xs text-gray-400 mt-0.5">via {{ candidate.source }}</p>

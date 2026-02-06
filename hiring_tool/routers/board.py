@@ -39,13 +39,16 @@ async def board(
     for stage in columns:
         columns[stage].sort(key=lambda c: (c.score is not None, c.score or 0), reverse=True)
 
-    positions = db.exec(select(Position).where(Position.status == "open")).all()
+    positions = db.exec(select(Position)).all()
+    position_map = {p.id: p.title for p in positions}
+    open_positions = [p for p in positions if p.status == "open"]
 
     return templates.TemplateResponse("board.html", {
         "request": request,
         "columns": columns,
         "stages": BOARD_STAGES,
-        "positions": positions,
+        "positions": open_positions,
+        "position_map": position_map,
         "selected_position_id": position_id,
     })
 
@@ -78,8 +81,11 @@ async def move_candidate(
         db.commit()
         db.refresh(candidate)
 
+    positions = db.exec(select(Position)).all()
+    position_map = {p.id: p.title for p in positions}
+
     return templates.TemplateResponse("partials/candidate_card.html", {
-        "request": request, "candidate": candidate,
+        "request": request, "candidate": candidate, "position_map": position_map,
     })
 
 
@@ -100,8 +106,12 @@ async def board_column(
     candidates = db.exec(stmt).all()
     candidates.sort(key=lambda c: (c.score is not None, c.score or 0), reverse=True)
 
+    positions = db.exec(select(Position)).all()
+    position_map = {p.id: p.title for p in positions}
+
     return templates.TemplateResponse("partials/kanban_column.html", {
         "request": request,
         "stage": stage,
         "candidates": candidates,
+        "position_map": position_map,
     })
