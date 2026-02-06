@@ -200,6 +200,43 @@ class BrowserAgent:
                 "page_state": page_state,
             }
 
+    async def extract_vue_token(self) -> dict | None:
+        """Extract authToken from GHL's Vue store.
+
+        Retries up to 3 times with 2s delay (Vue store may not be populated
+        immediately after page load).
+
+        Returns:
+            dict with authToken, companyId, userId or None if extraction fails
+        """
+        js = """
+        (function() {
+            try {
+                var app = document.querySelector('#app');
+                if (!app || !app.__vue_app__) return null;
+                var store = app.__vue_app__.config.globalProperties.$store;
+                if (!store) return null;
+                var user = store.state.auth && store.state.auth.user;
+                if (!user || !user.authToken) return null;
+                return {
+                    authToken: user.authToken,
+                    companyId: user.companyId || null,
+                    userId: user.id || null
+                };
+            } catch(e) { return null; }
+        })()
+        """
+        for attempt in range(3):
+            try:
+                result = await self.evaluate(js)
+                if result and result.get("authToken"):
+                    return result
+            except Exception:
+                pass
+            if attempt < 2:
+                await asyncio.sleep(2)
+        return None
+
     def get_network_log(self) -> list[dict]:
         """Get captured network requests."""
         if self.network:

@@ -26,7 +26,7 @@ class NoTokenError(Exception):
             "Options:\n"
             "  1. Run 'ghl oauth connect' for OAuth authentication (recommended)\n"
             "  2. Run 'ghl auth quick' for session-based authentication\n"
-            "  3. Run 'ghl browser capture' to capture a session manually"
+            "  3. Run 'ghl auth bridge' to capture token via bookmarklet"
         )
         super().__init__(message or default_msg)
 

@@ -113,11 +113,26 @@ def auth_quick(
                 else:
                     return {"success": False, "error": "Login timeout"}
 
-            # Give some time for API calls to happen
-            console.print("[dim]Capturing session data...[/dim]")
+            # Try Vue store extraction first (fastest method)
+            console.print("[dim]Extracting token from Vue store...[/dim]")
+            vue_data = await agent.extract_vue_token()
+            if vue_data and vue_data.get("authToken"):
+                manager = TokenManager()
+                manager.save_session_from_capture(
+                    token=vue_data["authToken"],
+                    company_id=vue_data.get("companyId"),
+                    user_id=vue_data.get("userId"),
+                )
+                return {
+                    "success": True,
+                    "company_id": vue_data.get("companyId"),
+                    "method": "vue_store",
+                }
+
+            # Fall back to network capture
+            console.print("[dim]Vue store extraction failed, trying network capture...[/dim]")
             await asyncio.sleep(3)
 
-            # Extract tokens
             tokens = agent.get_auth_tokens()
             ghl_data = agent.network.get_ghl_specific() if agent.network else {}
 
@@ -144,6 +159,7 @@ def auth_quick(
                 "success": True,
                 "location_id": ghl_data.get("location_id"),
                 "company_id": ghl_data.get("auth", {}).get("companyId"),
+                "method": "network_capture",
             }
 
     try:
@@ -274,6 +290,77 @@ def auth_clear(
     else:
         manager.clear_all()
         console.print("[green]All tokens cleared[/green]")
+
+
+@auth_app.command("bridge")
+def auth_bridge(
+    port: int = typer.Option(3456, "--port", "-p", help="Bridge server port"),
+    timeout: int = typer.Option(120, "--timeout", "-t", help="Max seconds to wait for token"),
+):
+    """Capture GHL token via bookmarklet from an existing browser session.
+
+    Starts a local server with a bookmarklet page. Drag the bookmarklet
+    to your bookmarks bar, then click it on any GHL page to capture
+    the session token.
+
+    This method works with your existing Chrome session - no need to
+    open a new browser window.
+    """
+    import webbrowser
+    from .auth import TokenManager, TokenBridgeServer
+
+    server = TokenBridgeServer(port=port)
+
+    try:
+        actual_port = server.start()
+        url = f"http://localhost:{actual_port}/"
+
+        console.print(
+            Panel(
+                "[bold]GHL Token Bridge[/bold]\n\n"
+                "A browser tab will open with a bookmarklet button.\n\n"
+                "1. Drag the button to your bookmarks bar\n"
+                "2. Navigate to app.gohighlevel.com (log in if needed)\n"
+                "3. Click the bookmarklet\n\n"
+                f"Bridge server running on: {url}",
+                title="Token Bridge",
+            )
+        )
+
+        webbrowser.open(url)
+        console.print("[dim]Waiting for token...[/dim]")
+
+        token_data = server.wait_for_token(timeout=timeout)
+
+        # Save token
+        manager = TokenManager()
+        manager.save_session_from_capture(
+            token=token_data["authToken"],
+            company_id=token_data.get("companyId"),
+            user_id=token_data.get("userId"),
+        )
+
+        console.print(
+            Panel(
+                f"[bold green]Token captured successfully![/bold green]\n\n"
+                f"Company ID: {token_data.get('companyId', 'N/A')}\n"
+                f"User ID: {token_data.get('userId', 'N/A')}\n\n"
+                "[dim]You can now use 'ghl contacts list' and other API commands.[/dim]",
+                title="Auth Complete",
+            )
+        )
+
+    except TimeoutError:
+        console.print("[red]Timeout waiting for token. Make sure you clicked the bookmarklet on a GHL page.[/red]")
+        raise typer.Exit(1)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Bridge cancelled[/yellow]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+    finally:
+        server.stop()
 
 
 # OAuth sub-commands

@@ -14,8 +14,10 @@ Usage:
 """
 
 from .manager import TokenManager, NoTokenError
+from .bridge import TokenBridgeServer
 
 __all__ = [
     "TokenManager",
     "NoTokenError",
+    "TokenBridgeServer",
 ]

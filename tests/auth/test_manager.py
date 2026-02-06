@@ -313,6 +313,7 @@ class TestNoTokenError:
 
         assert "ghl oauth connect" in message
         assert "ghl auth quick" in message
+        assert "ghl auth bridge" in message
 
     def test_custom_message(self):
         """Should allow custom message."""
