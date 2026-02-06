@@ -33,7 +33,6 @@ def render_setup_guide(
     needs_workflows = True
 
     if provision_result:
-        manual_types = {a.resource_type for a in provision_result.actions if a.action == "MANUAL"}
         existing_types = {a.resource_type for a in provision_result.actions if a.action == "OK"}
         needs_pipeline = "pipelines" not in existing_types
         needs_form = "forms" not in existing_types
@@ -134,7 +133,7 @@ def _render_workflow_suggestions(console: Console) -> None:
         "Send rejection email after 24h delay",
     )
 
-    console.print(f"\n  Suggested automations:")
+    console.print("\n  Suggested automations:")
     console.print(table)
     console.print(
         "\n  [dim]Go to Automation > Workflows to create these.[/dim]"

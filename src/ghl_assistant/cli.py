@@ -31,6 +31,7 @@ account_app = typer.Typer(help="Account and location info")
 ai_app = typer.Typer(help="Conversation AI agent management")
 voice_app = typer.Typer(help="Voice AI agent management")
 agency_app = typer.Typer(help="Agency-level sub-account management")
+hiring_app = typer.Typer(help="Hiring funnel setup and applicant management")
 
 app.add_typer(auth_app, name="auth")
 app.add_typer(tdlc_app, name="10dlc")
@@ -46,6 +47,7 @@ app.add_typer(account_app, name="account")
 app.add_typer(ai_app, name="ai")
 app.add_typer(voice_app, name="voice")
 app.add_typer(agency_app, name="agency")
+app.add_typer(hiring_app, name="hiring")
 
 
 def _output_result(result: dict[str, Any], json_output: bool = False) -> None:
@@ -2622,10 +2624,6 @@ def agency_plan(
 # Hiring Funnel Commands
 # ============================================================================
 
-hiring_app = typer.Typer(help="Hiring funnel setup and applicant management")
-app.add_typer(hiring_app, name="hiring")
-
-
 @hiring_app.command("setup")
 def hiring_setup(
     role: str = typer.Option(None, "--role", "-r", help="Role/position name for context"),
@@ -2667,8 +2665,12 @@ def hiring_setup(
 
             return result, agent_result
 
-    with console.status("[bold cyan]Setting up hiring funnel...[/bold cyan]"):
-        result, agent_result = asyncio.run(_setup())
+    try:
+        with console.status("[bold cyan]Setting up hiring funnel...[/bold cyan]"):
+            result, agent_result = asyncio.run(_setup())
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
 
     # Show provision plan
     from .blueprint.diff import render_plan
@@ -2760,7 +2762,11 @@ def hiring_add_applicant(
 
             return {"contact": contact, "opportunity": opp_result}
 
-    result = asyncio.run(_add())
+    try:
+        result = asyncio.run(_add())
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
 
     if json_output:
         _output_result(result, json_output=True)
@@ -2779,7 +2785,6 @@ def hiring_add_applicant(
 @hiring_app.command("list")
 def hiring_list(
     stage: str = typer.Option(None, "--stage", "-s", help="Filter by stage name"),
-    position: str = typer.Option(None, "--position", help="Filter by position"),
     limit: int = typer.Option(20, "--limit", "-l", help="Max results"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
@@ -2827,7 +2832,11 @@ def hiring_list(
 
             return {"opportunities": opps, "stages": stages, "pipeline_id": pipeline_id}
 
-    result = asyncio.run(_list())
+    try:
+        result = asyncio.run(_list())
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
 
     if result.get("error"):
         console.print(f"[red]{result['error']}[/red]")
@@ -2935,7 +2944,11 @@ def hiring_advance(
 
             return {"result": result, "target_stage": target_name}
 
-    result = asyncio.run(_advance())
+    try:
+        result = asyncio.run(_advance())
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
 
     if result.get("error"):
         console.print(f"[red]{result['error']}[/red]")
@@ -2971,9 +2984,13 @@ def hiring_reject(
                             break
                     break
 
+            warnings = []
+
             # Move to rejected stage if found
             if rejected_stage_id:
                 await ghl.opportunities.move_stage(opp_id, rejected_stage_id)
+            else:
+                warnings.append("No 'Rejected' stage found in pipeline - skipped stage move")
 
             # Mark as lost
             await ghl.opportunities.mark_lost(opp_id)
@@ -2984,21 +3001,28 @@ def hiring_reject(
                     await ghl.contacts.add_tag(contact_id, "rejected")
                     await ghl.contacts.remove_tag(contact_id, "applicant")
                 except Exception:
-                    pass
+                    warnings.append("Failed to update contact tags")
 
                 # Add rejection note
                 if reason:
                     try:
                         await ghl.contacts.add_note(contact_id, f"Rejection reason: {reason}")
                     except Exception:
-                        pass
+                        warnings.append("Failed to add rejection note")
 
-            return {"status": "rejected"}
+            return {"status": "rejected", "warnings": warnings}
 
-    asyncio.run(_reject())
+    try:
+        result = asyncio.run(_reject())
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
     console.print("[yellow]Applicant rejected.[/yellow]")
     if reason:
         console.print(f"  Reason: {reason}")
+    for w in result.get("warnings", []):
+        console.print(f"  [yellow]Warning: {w}[/yellow]")
 
 
 @hiring_app.command("hire")
@@ -3029,9 +3053,13 @@ def hiring_hire(
                             break
                     break
 
+            warnings = []
+
             # Move to hired stage
             if hired_stage_id:
                 await ghl.opportunities.move_stage(opp_id, hired_stage_id)
+            else:
+                warnings.append("No 'Hired' stage found in pipeline - skipped stage move")
 
             # Mark as won
             await ghl.opportunities.mark_won(opp_id)
@@ -3042,7 +3070,7 @@ def hiring_hire(
                     await ghl.contacts.add_tag(contact_id, "hired")
                     await ghl.contacts.remove_tag(contact_id, "applicant")
                 except Exception:
-                    pass
+                    warnings.append("Failed to update contact tags")
 
                 # Update custom fields
                 updates: dict[str, Any] = {}
@@ -3054,7 +3082,7 @@ def hiring_hire(
                     try:
                         await ghl.contacts.update(contact_id, custom_fields=updates)
                     except Exception:
-                        pass
+                        warnings.append("Failed to update custom fields")
 
                 # Add hire note
                 note_parts = ["Applicant hired!"]
@@ -3065,16 +3093,23 @@ def hiring_hire(
                 try:
                     await ghl.contacts.add_note(contact_id, " ".join(note_parts))
                 except Exception:
-                    pass
+                    warnings.append("Failed to add hire note")
 
-            return {"status": "hired"}
+            return {"status": "hired", "warnings": warnings}
 
-    asyncio.run(_hire())
+    try:
+        result = asyncio.run(_hire())
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
     console.print("[green]Applicant hired![/green]")
     if start_date:
         console.print(f"  Start date: {start_date}")
     if salary is not None:
         console.print(f"  Salary: ${salary:,.2f}")
+    for w in result.get("warnings", []):
+        console.print(f"  [yellow]Warning: {w}[/yellow]")
 
 
 @hiring_app.command("status")
@@ -3139,7 +3174,11 @@ def hiring_status(
                 "rejected": rejected,
             }
 
-    result = asyncio.run(_status())
+    try:
+        result = asyncio.run(_status())
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
 
     if result.get("error"):
         console.print(f"[red]{result['error']}[/red]")
@@ -3188,8 +3227,12 @@ def hiring_audit(
             from .blueprint.engine import audit_location
             return await audit_location(ghl, bp)
 
-    with console.status("[bold cyan]Auditing hiring funnel...[/bold cyan]"):
-        result = asyncio.run(_audit())
+    try:
+        with console.status("[bold cyan]Auditing hiring funnel...[/bold cyan]"):
+            result = asyncio.run(_audit())
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
 
     if json_output:
         audit_data = {
