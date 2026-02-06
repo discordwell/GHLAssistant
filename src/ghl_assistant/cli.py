@@ -2619,6 +2619,606 @@ def agency_plan(
 
 
 # ============================================================================
+# Hiring Funnel Commands
+# ============================================================================
+
+hiring_app = typer.Typer(help="Hiring funnel setup and applicant management")
+app.add_typer(hiring_app, name="hiring")
+
+
+@hiring_app.command("setup")
+def hiring_setup(
+    role: str = typer.Option(None, "--role", "-r", help="Role/position name for context"),
+    stages: str = typer.Option(None, "--stages", "-s", help="Comma-separated pipeline stage names"),
+    dry_run: bool = typer.Option(True, "--dry-run/--apply", help="Dry-run (default) or apply changes"),
+    output: str = typer.Option(None, "--output", "-o", help="Export blueprint to YAML file"),
+):
+    """Provision hiring funnel resources (tags, fields, values, AI agent) and show UI guide."""
+    from .api import GHLClient
+    from .hiring import get_hiring_blueprint, render_setup_guide
+    from .hiring.template import SCREENING_AGENT_PROMPT
+
+    stage_list = [s.strip() for s in stages.split(",")] if stages else None
+    bp = get_hiring_blueprint(role=role, stages=stage_list)
+
+    if output:
+        from .blueprint.serialization import save_blueprint
+        filepath = save_blueprint(bp, output)
+        console.print(f"[green]Blueprint exported to {filepath}[/green]")
+        return
+
+    async def _setup():
+        async with GHLClient.from_session() as ghl:
+            from .blueprint.engine import provision_location
+            result = await provision_location(ghl, bp, dry_run=dry_run)
+
+            # Create AI screening agent if applying
+            agent_result = None
+            if not dry_run:
+                try:
+                    agent_result = await ghl.conversation_ai.create_agent(
+                        name="Hiring Screener",
+                        prompt=SCREENING_AGENT_PROMPT,
+                        model="gpt-4",
+                        temperature=0.5,
+                    )
+                except Exception as e:
+                    result.errors.append(f"Failed to create screening agent: {e}")
+
+            return result, agent_result
+
+    with console.status("[bold cyan]Setting up hiring funnel...[/bold cyan]"):
+        result, agent_result = asyncio.run(_setup())
+
+    # Show provision plan
+    from .blueprint.diff import render_plan
+    render_plan(result, console)
+
+    if dry_run:
+        console.print("[dim]This is a dry run. Use --apply to execute changes.[/dim]")
+    else:
+        if result.errors:
+            for err in result.errors:
+                console.print(f"[red]Error: {err}[/red]")
+        else:
+            console.print("[green]Provisioned tags, custom fields, and custom values.[/green]")
+        if agent_result:
+            agent_id = agent_result.get("agent", {}).get("id", "unknown")
+            console.print(f"[green]Created screening agent (ID: {agent_id})[/green]")
+
+    # Show manual setup guide
+    pipeline_stages = stage_list or None
+    if pipeline_stages is None:
+        from .hiring.template import DEFAULT_STAGES
+        pipeline_stages = DEFAULT_STAGES
+    render_setup_guide(provision_result=result, pipeline_stages=pipeline_stages, console=console)
+
+
+@hiring_app.command("add-applicant")
+def hiring_add_applicant(
+    first_name: str = typer.Argument(..., help="Applicant first name"),
+    last_name: str = typer.Argument(..., help="Applicant last name"),
+    email: str = typer.Option(None, "--email", "-e", help="Email address"),
+    phone: str = typer.Option(None, "--phone", "-p", help="Phone number (E.164)"),
+    position: str = typer.Option(None, "--position", help="Position applied for"),
+    resume: str = typer.Option(None, "--resume", help="Resume URL"),
+    salary: float = typer.Option(None, "--salary", help="Desired salary"),
+    source: str = typer.Option(None, "--source", help="Referral source"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Create a new applicant contact and opportunity in the hiring pipeline."""
+    from .api import GHLClient
+
+    async def _add():
+        async with GHLClient.from_session() as ghl:
+            # Build custom fields
+            custom_fields: dict[str, Any] = {}
+            if position:
+                custom_fields["contact.position_applied"] = position
+            if resume:
+                custom_fields["contact.resume_url"] = resume
+            if salary is not None:
+                custom_fields["contact.desired_salary"] = salary
+            if source:
+                custom_fields["contact.referral_source"] = source
+
+            # Create contact
+            contact = await ghl.contacts.create(
+                first_name=first_name,
+                last_name=last_name,
+                email=email,
+                phone=phone,
+                tags=["applicant"],
+                custom_fields=custom_fields if custom_fields else None,
+            )
+
+            contact_id = contact.get("contact", {}).get("id", contact.get("id", ""))
+            contact_name = f"{first_name} {last_name}"
+
+            # Find Hiring Pipeline and first stage
+            pipelines_resp = await ghl.opportunities.pipelines()
+            pipelines = pipelines_resp.get("pipelines", [])
+            hiring_pipeline = None
+            for p in pipelines:
+                if "hiring" in p.get("name", "").lower():
+                    hiring_pipeline = p
+                    break
+
+            opp_result = None
+            if hiring_pipeline and contact_id:
+                pipeline_id = hiring_pipeline.get("id", hiring_pipeline.get("_id", ""))
+                stages = hiring_pipeline.get("stages", [])
+                first_stage_id = stages[0].get("id", stages[0].get("_id", "")) if stages else ""
+
+                if pipeline_id and first_stage_id:
+                    opp_result = await ghl.opportunities.create(
+                        pipeline_id=pipeline_id,
+                        stage_id=first_stage_id,
+                        contact_id=contact_id,
+                        name=f"{contact_name} - {position or 'Applicant'}",
+                    )
+
+            return {"contact": contact, "opportunity": opp_result}
+
+    result = asyncio.run(_add())
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        contact_data = result.get("contact", {})
+        contact_id = contact_data.get("contact", {}).get("id", contact_data.get("id", "N/A"))
+        console.print(f"[green]Applicant created![/green] Contact ID: {contact_id}")
+        if result.get("opportunity"):
+            opp_id = result["opportunity"].get("opportunity", {}).get("id",
+                     result["opportunity"].get("id", "N/A"))
+            console.print(f"  Opportunity ID: {opp_id}")
+        else:
+            console.print("  [yellow]No hiring pipeline found - create one via 'ghl hiring setup'[/yellow]")
+
+
+@hiring_app.command("list")
+def hiring_list(
+    stage: str = typer.Option(None, "--stage", "-s", help="Filter by stage name"),
+    position: str = typer.Option(None, "--position", help="Filter by position"),
+    limit: int = typer.Option(20, "--limit", "-l", help="Max results"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """List applicants in the hiring pipeline."""
+    from .api import GHLClient
+
+    async def _list():
+        async with GHLClient.from_session() as ghl:
+            # Find hiring pipeline
+            pipelines_resp = await ghl.opportunities.pipelines()
+            pipelines = pipelines_resp.get("pipelines", [])
+            hiring_pipeline = None
+            for p in pipelines:
+                if "hiring" in p.get("name", "").lower():
+                    hiring_pipeline = p
+                    break
+
+            if not hiring_pipeline:
+                return {"error": "No hiring pipeline found", "opportunities": []}
+
+            pipeline_id = hiring_pipeline.get("id", hiring_pipeline.get("_id", ""))
+            stages = {
+                s.get("id", s.get("_id", "")): s.get("name", "")
+                for s in hiring_pipeline.get("stages", [])
+            }
+
+            # Filter by stage if specified
+            target_stage_id = None
+            if stage:
+                for sid, sname in stages.items():
+                    if stage.lower() in sname.lower():
+                        target_stage_id = sid
+                        break
+
+            opps_resp = await ghl.opportunities.list(
+                pipeline_id=pipeline_id,
+                stage_id=target_stage_id,
+                limit=limit,
+            )
+
+            # Enrich with stage names
+            opps = opps_resp.get("opportunities", [])
+            for opp in opps:
+                opp["_stage_name"] = stages.get(opp.get("pipelineStageId", ""), "Unknown")
+
+            return {"opportunities": opps, "stages": stages, "pipeline_id": pipeline_id}
+
+    result = asyncio.run(_list())
+
+    if result.get("error"):
+        console.print(f"[red]{result['error']}[/red]")
+        raise typer.Exit(1)
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        opps = result.get("opportunities", [])
+        table = Table(title=f"Hiring Pipeline Applicants ({len(opps)})")
+        table.add_column("ID", style="dim", max_width=24)
+        table.add_column("Name", style="cyan")
+        table.add_column("Stage", style="yellow")
+        table.add_column("Status", style="white")
+        table.add_column("Value", style="green")
+
+        for opp in opps:
+            table.add_row(
+                opp.get("id", opp.get("_id", ""))[:24],
+                opp.get("name", "-"),
+                opp.get("_stage_name", "Unknown"),
+                opp.get("status", "-"),
+                str(opp.get("monetaryValue", "-")),
+            )
+
+        console.print(table)
+
+
+@hiring_app.command("advance")
+def hiring_advance(
+    opp_id: str = typer.Argument(..., help="Opportunity ID"),
+    stage_name: str = typer.Option(None, "--stage", "-s", help="Target stage name (default: next stage)"),
+):
+    """Move an applicant to the next pipeline stage or a specific stage."""
+    from .api import GHLClient
+
+    async def _advance():
+        async with GHLClient.from_session() as ghl:
+            # Get current opportunity
+            opp = await ghl.opportunities.get(opp_id)
+            opp_data = opp.get("opportunity", opp)
+            current_stage_id = opp_data.get("pipelineStageId", "")
+            pipeline_id = opp_data.get("pipelineId", "")
+            contact_id = opp_data.get("contactId", "")
+
+            # Get pipeline stages
+            pipelines_resp = await ghl.opportunities.pipelines()
+            pipeline = None
+            for p in pipelines_resp.get("pipelines", []):
+                if p.get("id", p.get("_id", "")) == pipeline_id:
+                    pipeline = p
+                    break
+
+            if not pipeline:
+                return {"error": "Pipeline not found"}
+
+            stages = pipeline.get("stages", [])
+
+            if stage_name:
+                # Find target stage by name
+                target = None
+                for s in stages:
+                    if stage_name.lower() in s.get("name", "").lower():
+                        target = s
+                        break
+                if not target:
+                    return {"error": f"Stage '{stage_name}' not found"}
+                target_stage_id = target.get("id", target.get("_id", ""))
+                target_name = target.get("name", "")
+            else:
+                # Find next stage
+                current_idx = None
+                for i, s in enumerate(stages):
+                    if s.get("id", s.get("_id", "")) == current_stage_id:
+                        current_idx = i
+                        break
+
+                if current_idx is None or current_idx >= len(stages) - 1:
+                    return {"error": "Already at last stage or stage not found"}
+
+                target = stages[current_idx + 1]
+                target_stage_id = target.get("id", target.get("_id", ""))
+                target_name = target.get("name", "")
+
+            result = await ghl.opportunities.move_stage(opp_id, target_stage_id)
+
+            # Update tags based on stage
+            if contact_id:
+                lower_name = target_name.lower()
+                if "interview" in lower_name:
+                    try:
+                        await ghl.contacts.add_tag(contact_id, "interview-scheduled")
+                    except Exception:
+                        pass
+                elif "offer" in lower_name:
+                    try:
+                        await ghl.contacts.add_tag(contact_id, "offer-extended")
+                    except Exception:
+                        pass
+                elif "screening" in lower_name:
+                    try:
+                        await ghl.contacts.add_tag(contact_id, "screening")
+                    except Exception:
+                        pass
+
+            return {"result": result, "target_stage": target_name}
+
+    result = asyncio.run(_advance())
+
+    if result.get("error"):
+        console.print(f"[red]{result['error']}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[green]Moved to stage: {result['target_stage']}[/green]")
+
+
+@hiring_app.command("reject")
+def hiring_reject(
+    opp_id: str = typer.Argument(..., help="Opportunity ID"),
+    reason: str = typer.Option(None, "--reason", "-r", help="Rejection reason (added as note)"),
+):
+    """Reject an applicant - moves to Rejected stage and marks as lost."""
+    from .api import GHLClient
+
+    async def _reject():
+        async with GHLClient.from_session() as ghl:
+            # Get opportunity for contact ID and pipeline
+            opp = await ghl.opportunities.get(opp_id)
+            opp_data = opp.get("opportunity", opp)
+            contact_id = opp_data.get("contactId", "")
+            pipeline_id = opp_data.get("pipelineId", "")
+
+            # Find Rejected stage
+            pipelines_resp = await ghl.opportunities.pipelines()
+            rejected_stage_id = None
+            for p in pipelines_resp.get("pipelines", []):
+                if p.get("id", p.get("_id", "")) == pipeline_id:
+                    for s in p.get("stages", []):
+                        if "reject" in s.get("name", "").lower():
+                            rejected_stage_id = s.get("id", s.get("_id", ""))
+                            break
+                    break
+
+            # Move to rejected stage if found
+            if rejected_stage_id:
+                await ghl.opportunities.move_stage(opp_id, rejected_stage_id)
+
+            # Mark as lost
+            await ghl.opportunities.mark_lost(opp_id)
+
+            # Update tags
+            if contact_id:
+                try:
+                    await ghl.contacts.add_tag(contact_id, "rejected")
+                    await ghl.contacts.remove_tag(contact_id, "applicant")
+                except Exception:
+                    pass
+
+                # Add rejection note
+                if reason:
+                    try:
+                        await ghl.contacts.add_note(contact_id, f"Rejection reason: {reason}")
+                    except Exception:
+                        pass
+
+            return {"status": "rejected"}
+
+    asyncio.run(_reject())
+    console.print("[yellow]Applicant rejected.[/yellow]")
+    if reason:
+        console.print(f"  Reason: {reason}")
+
+
+@hiring_app.command("hire")
+def hiring_hire(
+    opp_id: str = typer.Argument(..., help="Opportunity ID"),
+    start_date: str = typer.Option(None, "--start-date", help="Start date (YYYY-MM-DD)"),
+    salary: float = typer.Option(None, "--salary", help="Offered salary"),
+):
+    """Hire an applicant - moves to Hired stage and marks as won."""
+    from .api import GHLClient
+
+    async def _hire():
+        async with GHLClient.from_session() as ghl:
+            # Get opportunity
+            opp = await ghl.opportunities.get(opp_id)
+            opp_data = opp.get("opportunity", opp)
+            contact_id = opp_data.get("contactId", "")
+            pipeline_id = opp_data.get("pipelineId", "")
+
+            # Find Hired stage
+            pipelines_resp = await ghl.opportunities.pipelines()
+            hired_stage_id = None
+            for p in pipelines_resp.get("pipelines", []):
+                if p.get("id", p.get("_id", "")) == pipeline_id:
+                    for s in p.get("stages", []):
+                        if "hired" in s.get("name", "").lower():
+                            hired_stage_id = s.get("id", s.get("_id", ""))
+                            break
+                    break
+
+            # Move to hired stage
+            if hired_stage_id:
+                await ghl.opportunities.move_stage(opp_id, hired_stage_id)
+
+            # Mark as won
+            await ghl.opportunities.mark_won(opp_id)
+
+            # Update tags
+            if contact_id:
+                try:
+                    await ghl.contacts.add_tag(contact_id, "hired")
+                    await ghl.contacts.remove_tag(contact_id, "applicant")
+                except Exception:
+                    pass
+
+                # Update custom fields
+                updates: dict[str, Any] = {}
+                if start_date:
+                    updates["contact.available_start_date"] = start_date
+                if salary is not None:
+                    updates["contact.desired_salary"] = salary
+                if updates:
+                    try:
+                        await ghl.contacts.update(contact_id, custom_fields=updates)
+                    except Exception:
+                        pass
+
+                # Add hire note
+                note_parts = ["Applicant hired!"]
+                if start_date:
+                    note_parts.append(f"Start date: {start_date}")
+                if salary is not None:
+                    note_parts.append(f"Salary: ${salary:,.2f}")
+                try:
+                    await ghl.contacts.add_note(contact_id, " ".join(note_parts))
+                except Exception:
+                    pass
+
+            return {"status": "hired"}
+
+    asyncio.run(_hire())
+    console.print("[green]Applicant hired![/green]")
+    if start_date:
+        console.print(f"  Start date: {start_date}")
+    if salary is not None:
+        console.print(f"  Salary: ${salary:,.2f}")
+
+
+@hiring_app.command("status")
+def hiring_status(
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Show hiring funnel dashboard - counts per stage."""
+    from .api import GHLClient
+
+    async def _status():
+        async with GHLClient.from_session() as ghl:
+            pipelines_resp = await ghl.opportunities.pipelines()
+            pipelines = pipelines_resp.get("pipelines", [])
+            hiring_pipeline = None
+            for p in pipelines:
+                if "hiring" in p.get("name", "").lower():
+                    hiring_pipeline = p
+                    break
+
+            if not hiring_pipeline:
+                return {"error": "No hiring pipeline found"}
+
+            pipeline_id = hiring_pipeline.get("id", hiring_pipeline.get("_id", ""))
+            stages = hiring_pipeline.get("stages", [])
+
+            # Get all opportunities
+            opps_resp = await ghl.opportunities.list(pipeline_id=pipeline_id, limit=100)
+            opps = opps_resp.get("opportunities", [])
+
+            # Count per stage
+            stage_counts: dict[str, int] = {}
+            stage_names: dict[str, str] = {}
+            for s in stages:
+                sid = s.get("id", s.get("_id", ""))
+                sname = s.get("name", "")
+                stage_names[sid] = sname
+                stage_counts[sname] = 0
+
+            total = len(opps)
+            active = 0
+            hired = 0
+            rejected = 0
+
+            for opp in opps:
+                stage_id = opp.get("pipelineStageId", "")
+                sname = stage_names.get(stage_id, "Unknown")
+                stage_counts[sname] = stage_counts.get(sname, 0) + 1
+
+                status = opp.get("status", "")
+                if status == "open":
+                    active += 1
+                elif status == "won":
+                    hired += 1
+                elif status == "lost":
+                    rejected += 1
+
+            return {
+                "stage_counts": stage_counts,
+                "total": total,
+                "active": active,
+                "hired": hired,
+                "rejected": rejected,
+            }
+
+    result = asyncio.run(_status())
+
+    if result.get("error"):
+        console.print(f"[red]{result['error']}[/red]")
+        raise typer.Exit(1)
+
+    if json_output:
+        _output_result(result, json_output=True)
+    else:
+        # Summary panel
+        console.print(Panel(
+            f"[bold]Total:[/bold] {result['total']}  |  "
+            f"[green]Active:[/green] {result['active']}  |  "
+            f"[cyan]Hired:[/cyan] {result['hired']}  |  "
+            f"[red]Rejected:[/red] {result['rejected']}",
+            title="Hiring Dashboard",
+        ))
+
+        # Stage breakdown
+        table = Table(title="Applicants by Stage")
+        table.add_column("Stage", style="cyan")
+        table.add_column("Count", style="bold", justify="right")
+
+        for stage_name, count in result.get("stage_counts", {}).items():
+            style = ""
+            if "hired" in stage_name.lower():
+                style = "green"
+            elif "reject" in stage_name.lower():
+                style = "red"
+            table.add_row(stage_name, f"[{style}]{count}[/{style}]" if style else str(count))
+
+        console.print(table)
+
+
+@hiring_app.command("audit")
+def hiring_audit(
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Audit the current location against the hiring funnel blueprint."""
+    from .api import GHLClient
+    from .hiring import get_hiring_blueprint
+
+    bp = get_hiring_blueprint()
+
+    async def _audit():
+        async with GHLClient.from_session() as ghl:
+            from .blueprint.engine import audit_location
+            return await audit_location(ghl, bp)
+
+    with console.status("[bold cyan]Auditing hiring funnel...[/bold cyan]"):
+        result = asyncio.run(_audit())
+
+    if json_output:
+        audit_data = {
+            "compliance_score": result.compliance_score,
+            "total_resources": result.total_resources,
+            "matched_resources": result.matched_resources,
+            "actions": [
+                {
+                    "resource_type": a.resource_type,
+                    "name": a.name,
+                    "action": a.action,
+                    "details": a.details,
+                }
+                for a in result.plan.actions
+            ],
+            "health": result.health,
+        }
+        _output_result(audit_data, json_output=True)
+    else:
+        from .blueprint.diff import render_audit
+        render_audit(
+            result.plan,
+            health=result.health,
+            compliance_score=result.compliance_score,
+            console=console,
+        )
+
+
+# ============================================================================
 # Blueprint Commands (snapshot / provision / audit / bulk)
 # ============================================================================
 
