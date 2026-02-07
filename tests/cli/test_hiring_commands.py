@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
-from ghl_assistant.cli import app
+from maxlevel.cli import app
 from tests.conftest import SAMPLE_LOCATION_ID, SAMPLE_CONTACT_ID
 
 
@@ -145,10 +145,10 @@ def hiring_client_factory(hiring_mock_client):
 # ============================================================================
 
 class TestHiringSetup:
-    """Tests for 'ghl hiring setup' command."""
+    """Tests for 'maxlevel hiring setup' command."""
 
     def test_setup_dry_run(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             result = cli_runner.invoke(app, ["hiring", "setup"])
 
@@ -156,7 +156,7 @@ class TestHiringSetup:
             assert "dry run" in result.output.lower()
 
     def test_setup_apply(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             result = cli_runner.invoke(app, ["hiring", "setup", "--apply"])
 
@@ -164,14 +164,14 @@ class TestHiringSetup:
             hiring_mock_client.conversation_ai.create_agent.assert_called_once()
 
     def test_setup_with_role(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             result = cli_runner.invoke(app, ["hiring", "setup", "--role", "Engineer"])
 
             assert result.exit_code == 0
 
     def test_setup_with_custom_stages(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             result = cli_runner.invoke(app, [
                 "hiring", "setup",
@@ -190,10 +190,10 @@ class TestHiringSetup:
 
 
 class TestHiringAddApplicant:
-    """Tests for 'ghl hiring add-applicant' command."""
+    """Tests for 'maxlevel hiring add-applicant' command."""
 
     def test_add_applicant_minimal(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             result = cli_runner.invoke(app, ["hiring", "add-applicant", "John", "Doe"])
 
@@ -202,7 +202,7 @@ class TestHiringAddApplicant:
             hiring_mock_client.contacts.create.assert_called_once()
 
     def test_add_applicant_full(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             result = cli_runner.invoke(app, [
                 "hiring", "add-applicant", "Jane", "Smith",
@@ -224,7 +224,7 @@ class TestHiringAddApplicant:
             assert call_kwargs[1]["tags"] == ["applicant"]
 
     def test_add_applicant_creates_opportunity(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             result = cli_runner.invoke(app, [
                 "hiring", "add-applicant", "John", "Doe",
@@ -236,7 +236,7 @@ class TestHiringAddApplicant:
             assert "Opportunity ID" in result.output
 
     def test_add_applicant_json(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             result = cli_runner.invoke(app, [
                 "hiring", "add-applicant", "John", "Doe", "--json",
@@ -247,10 +247,10 @@ class TestHiringAddApplicant:
 
 
 class TestHiringList:
-    """Tests for 'ghl hiring list' command."""
+    """Tests for 'maxlevel hiring list' command."""
 
     def test_list_applicants(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             result = cli_runner.invoke(app, ["hiring", "list"])
 
@@ -259,7 +259,7 @@ class TestHiringList:
             assert "John Doe" in result.output
 
     def test_list_with_stage_filter(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             result = cli_runner.invoke(app, ["hiring", "list", "--stage", "Applied"])
 
@@ -269,14 +269,14 @@ class TestHiringList:
     def test_list_no_pipeline(self, cli_runner, hiring_mock_client, hiring_client_factory):
         hiring_mock_client.opportunities.pipelines = AsyncMock(return_value={"pipelines": []})
 
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             result = cli_runner.invoke(app, ["hiring", "list"])
 
             assert result.exit_code != 0 or "No hiring pipeline found" in result.output
 
     def test_list_json(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             result = cli_runner.invoke(app, ["hiring", "list", "--json"])
 
@@ -285,10 +285,10 @@ class TestHiringList:
 
 
 class TestHiringAdvance:
-    """Tests for 'ghl hiring advance' command."""
+    """Tests for 'maxlevel hiring advance' command."""
 
     def test_advance_to_next_stage(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             result = cli_runner.invoke(app, ["hiring", "advance", "opp_001"])
 
@@ -299,7 +299,7 @@ class TestHiringAdvance:
             )
 
     def test_advance_to_named_stage(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             result = cli_runner.invoke(app, ["hiring", "advance", "opp_001", "--stage", "Offer"])
 
@@ -310,7 +310,7 @@ class TestHiringAdvance:
             )
 
     def test_advance_adds_interview_tag(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             result = cli_runner.invoke(app, [
                 "hiring", "advance", "opp_001", "--stage", "Phone Interview",
@@ -322,7 +322,7 @@ class TestHiringAdvance:
             )
 
     def test_advance_invalid_stage(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             result = cli_runner.invoke(app, [
                 "hiring", "advance", "opp_001", "--stage", "Nonexistent",
@@ -332,10 +332,10 @@ class TestHiringAdvance:
 
 
 class TestHiringReject:
-    """Tests for 'ghl hiring reject' command."""
+    """Tests for 'maxlevel hiring reject' command."""
 
     def test_reject_applicant(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             result = cli_runner.invoke(app, ["hiring", "reject", "opp_001"])
 
@@ -344,7 +344,7 @@ class TestHiringReject:
             hiring_mock_client.opportunities.mark_lost.assert_called_once_with("opp_001")
 
     def test_reject_moves_to_rejected_stage(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             cli_runner.invoke(app, ["hiring", "reject", "opp_001"])
 
@@ -353,7 +353,7 @@ class TestHiringReject:
             )
 
     def test_reject_updates_tags(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             cli_runner.invoke(app, ["hiring", "reject", "opp_001"])
 
@@ -365,7 +365,7 @@ class TestHiringReject:
             )
 
     def test_reject_with_reason(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             result = cli_runner.invoke(app, [
                 "hiring", "reject", "opp_001", "--reason", "Not enough experience",
@@ -379,10 +379,10 @@ class TestHiringReject:
 
 
 class TestHiringHire:
-    """Tests for 'ghl hiring hire' command."""
+    """Tests for 'maxlevel hiring hire' command."""
 
     def test_hire_applicant(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             result = cli_runner.invoke(app, ["hiring", "hire", "opp_001"])
 
@@ -391,7 +391,7 @@ class TestHiringHire:
             hiring_mock_client.opportunities.mark_won.assert_called_once_with("opp_001")
 
     def test_hire_moves_to_hired_stage(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             cli_runner.invoke(app, ["hiring", "hire", "opp_001"])
 
@@ -400,7 +400,7 @@ class TestHiringHire:
             )
 
     def test_hire_updates_tags(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             cli_runner.invoke(app, ["hiring", "hire", "opp_001"])
 
@@ -412,7 +412,7 @@ class TestHiringHire:
             )
 
     def test_hire_with_start_date_and_salary(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             result = cli_runner.invoke(app, [
                 "hiring", "hire", "opp_001",
@@ -428,10 +428,10 @@ class TestHiringHire:
 
 
 class TestHiringStatus:
-    """Tests for 'ghl hiring status' command."""
+    """Tests for 'maxlevel hiring status' command."""
 
     def test_status_dashboard(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             result = cli_runner.invoke(app, ["hiring", "status"])
 
@@ -442,14 +442,14 @@ class TestHiringStatus:
     def test_status_no_pipeline(self, cli_runner, hiring_mock_client, hiring_client_factory):
         hiring_mock_client.opportunities.pipelines = AsyncMock(return_value={"pipelines": []})
 
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             result = cli_runner.invoke(app, ["hiring", "status"])
 
             assert result.exit_code != 0 or "No hiring pipeline found" in result.output
 
     def test_status_json(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             result = cli_runner.invoke(app, ["hiring", "status", "--json"])
 
@@ -459,17 +459,17 @@ class TestHiringStatus:
 
 
 class TestHiringAudit:
-    """Tests for 'ghl hiring audit' command."""
+    """Tests for 'maxlevel hiring audit' command."""
 
     def test_audit_runs(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             result = cli_runner.invoke(app, ["hiring", "audit"])
 
             assert result.exit_code == 0
 
     def test_audit_json(self, cli_runner, hiring_mock_client, hiring_client_factory):
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = hiring_client_factory()
             result = cli_runner.invoke(app, ["hiring", "audit", "--json"])
 

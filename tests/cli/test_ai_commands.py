@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 from typer.testing import CliRunner
 
-from ghl_assistant.cli import app
+from maxlevel.cli import app
 from tests.conftest import (
     SAMPLE_AGENT_ID,
     SAMPLE_ACTION_ID,
@@ -28,11 +28,11 @@ def mock_client_factory(mock_ghl_client_context):
 
 
 class TestAIListCommand:
-    """Tests for 'ghl ai list' command."""
+    """Tests for 'maxlevel ai list' command."""
 
     def test_list_agents(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test listing conversation AI agents."""
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = mock_client_factory()
 
             result = cli_runner.invoke(app, ["ai", "list"])
@@ -44,7 +44,7 @@ class TestAIListCommand:
 
     def test_list_agents_json(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test listing agents with JSON output."""
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = mock_client_factory()
 
             result = cli_runner.invoke(app, ["ai", "list", "--json"])
@@ -55,7 +55,7 @@ class TestAIListCommand:
 
     def test_list_agents_with_limit(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test listing agents with custom limit."""
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = mock_client_factory()
 
             result = cli_runner.invoke(app, ["ai", "list", "--limit", "10"])
@@ -65,11 +65,11 @@ class TestAIListCommand:
 
 
 class TestAIGetCommand:
-    """Tests for 'ghl ai get' command."""
+    """Tests for 'maxlevel ai get' command."""
 
     def test_get_agent(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test getting a single agent."""
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = mock_client_factory()
 
             result = cli_runner.invoke(app, ["ai", "get", SAMPLE_AGENT_ID])
@@ -81,11 +81,11 @@ class TestAIGetCommand:
 
 
 class TestAICreateCommand:
-    """Tests for 'ghl ai create' command."""
+    """Tests for 'maxlevel ai create' command."""
 
     def test_create_agent_minimal(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test creating an agent with minimal parameters."""
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = mock_client_factory()
 
             result = cli_runner.invoke(app, ["ai", "create", "Test Bot"])
@@ -102,7 +102,7 @@ class TestAICreateCommand:
 
     def test_create_agent_full(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test creating an agent with all parameters."""
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = mock_client_factory()
 
             result = cli_runner.invoke(app, [
@@ -122,11 +122,11 @@ class TestAICreateCommand:
 
 
 class TestAIUpdateCommand:
-    """Tests for 'ghl ai update' command."""
+    """Tests for 'maxlevel ai update' command."""
 
     def test_update_agent(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test updating an agent."""
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = mock_client_factory()
 
             result = cli_runner.invoke(app, [
@@ -149,7 +149,7 @@ class TestAIUpdateCommand:
 
     def test_update_agent_enable(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test enabling an agent."""
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = mock_client_factory()
 
             result = cli_runner.invoke(app, [
@@ -168,7 +168,7 @@ class TestAIUpdateCommand:
 
     def test_update_agent_disable(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test disabling an agent."""
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = mock_client_factory()
 
             result = cli_runner.invoke(app, [
@@ -187,11 +187,11 @@ class TestAIUpdateCommand:
 
 
 class TestAIDeleteCommand:
-    """Tests for 'ghl ai delete' command."""
+    """Tests for 'maxlevel ai delete' command."""
 
     def test_delete_agent_with_confirmation(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test deleting an agent with confirmation."""
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = mock_client_factory()
 
             result = cli_runner.invoke(app, ["ai", "delete", SAMPLE_AGENT_ID], input="y\n")
@@ -201,7 +201,7 @@ class TestAIDeleteCommand:
 
     def test_delete_agent_skip_confirmation(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test deleting an agent with --yes flag."""
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = mock_client_factory()
 
             result = cli_runner.invoke(app, ["ai", "delete", SAMPLE_AGENT_ID, "--yes"])
@@ -211,7 +211,7 @@ class TestAIDeleteCommand:
 
     def test_delete_agent_abort(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test aborting agent deletion."""
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = mock_client_factory()
 
             result = cli_runner.invoke(app, ["ai", "delete", SAMPLE_AGENT_ID], input="n\n")
@@ -221,11 +221,11 @@ class TestAIDeleteCommand:
 
 
 class TestAIActionsCommand:
-    """Tests for 'ghl ai actions' command."""
+    """Tests for 'maxlevel ai actions' command."""
 
     def test_list_actions(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test listing agent actions."""
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = mock_client_factory()
 
             result = cli_runner.invoke(app, ["ai", "actions", SAMPLE_AGENT_ID])
@@ -236,11 +236,11 @@ class TestAIActionsCommand:
 
 
 class TestAIAttachActionCommand:
-    """Tests for 'ghl ai attach-action' command."""
+    """Tests for 'maxlevel ai attach-action' command."""
 
     def test_attach_action(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test attaching an action to an agent."""
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = mock_client_factory()
 
             result = cli_runner.invoke(app, [
@@ -258,7 +258,7 @@ class TestAIAttachActionCommand:
 
     def test_attach_action_with_trigger(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test attaching an action with trigger condition."""
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = mock_client_factory()
 
             result = cli_runner.invoke(app, [
@@ -276,11 +276,11 @@ class TestAIAttachActionCommand:
 
 
 class TestAIRemoveActionCommand:
-    """Tests for 'ghl ai remove-action' command."""
+    """Tests for 'maxlevel ai remove-action' command."""
 
     def test_remove_action(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test removing an action from an agent."""
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = mock_client_factory()
 
             result = cli_runner.invoke(app, [
@@ -296,11 +296,11 @@ class TestAIRemoveActionCommand:
 
 
 class TestAIHistoryCommand:
-    """Tests for 'ghl ai history' command."""
+    """Tests for 'maxlevel ai history' command."""
 
     def test_list_history(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test listing AI generation history."""
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = mock_client_factory()
 
             result = cli_runner.invoke(app, ["ai", "history"])
@@ -315,7 +315,7 @@ class TestAIHistoryCommand:
 
     def test_list_history_with_agent_filter(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test filtering history by agent."""
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = mock_client_factory()
 
             result = cli_runner.invoke(app, [
@@ -331,11 +331,11 @@ class TestAIHistoryCommand:
 
 
 class TestAISettingsCommand:
-    """Tests for 'ghl ai settings' command."""
+    """Tests for 'maxlevel ai settings' command."""
 
     def test_get_settings(self, cli_runner, mock_ghl_client_context, mock_client_factory):
         """Test getting AI settings."""
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = mock_client_factory()
 
             result = cli_runner.invoke(app, ["ai", "settings"])
@@ -350,7 +350,7 @@ class TestAICommandHelp:
     """Tests for AI command help output."""
 
     def test_ai_help(self, cli_runner):
-        """Test 'ghl ai --help' shows all commands."""
+        """Test 'maxlevel ai --help' shows all commands."""
         result = cli_runner.invoke(app, ["ai", "--help"])
 
         assert result.exit_code == 0
@@ -366,7 +366,7 @@ class TestAICommandHelp:
         assert "settings" in result.output
 
     def test_ai_create_help(self, cli_runner):
-        """Test 'ghl ai create --help' shows options."""
+        """Test 'maxlevel ai create --help' shows options."""
         result = cli_runner.invoke(app, ["ai", "create", "--help"])
 
         assert result.exit_code == 0
@@ -388,7 +388,7 @@ class TestAICommandErrors:
             )
         )
 
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = mock_client_factory()
 
             result = cli_runner.invoke(app, ["ai", "list"])
@@ -406,7 +406,7 @@ class TestAICommandErrors:
             )
         )
 
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = mock_client_factory()
 
             result = cli_runner.invoke(app, ["ai", "get", "nonexistent_id"])
@@ -423,7 +423,7 @@ class TestAICommandErrors:
             side_effect=HTTPStatusError("HTTP 400", request=MagicMock(), response=mock_response)
         )
 
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = mock_client_factory()
 
             result = cli_runner.invoke(app, ["ai", "create", ""])
@@ -440,7 +440,7 @@ class TestAICommandErrors:
             )
         )
 
-        with patch("ghl_assistant.api.GHLClient") as MockClient:
+        with patch("maxlevel.api.GHLClient") as MockClient:
             MockClient.from_session.return_value = mock_client_factory()
 
             result = cli_runner.invoke(app, ["ai", "delete", "nonexistent_id", "--yes"])

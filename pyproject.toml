@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "ghl-assistant"
+name = "maxlevel"
 version = "0.1.0"
-description = "GoHighLevel automation assistant - CLI tools, templates, and AI wizards"
+description = "MaxLevel — GoHighLevel automation platform"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
@@ -56,14 +56,14 @@ crm = [
 ]
 
 [project.scripts]
-ghl = "ghl_assistant.cli:app"
+maxlevel = "maxlevel.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/discordwell/GHLAssistant"
-Repository = "https://github.com/discordwell/GHLAssistant"
+Homepage = "https://github.com/discordwell/MaxLevel"
+Repository = "https://github.com/discordwell/MaxLevel"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ghl_assistant"]
+packages = ["src/maxlevel"]
 
 [tool.ruff]
 line-length = 100

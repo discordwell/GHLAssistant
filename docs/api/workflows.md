@@ -21,7 +21,7 @@ ghl workflows remove-contact <workflow_id> <contact_id>
 ## Python API
 
 ```python
-from ghl_assistant.api import GHLClient
+from maxlevel.api import GHLClient
 
 async with GHLClient.from_session() as ghl:
     # List workflows

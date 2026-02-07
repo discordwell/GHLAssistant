@@ -6,14 +6,14 @@ from io import StringIO
 
 from rich.console import Console
 
-from ghl_assistant.browser.chrome_mcp.executor import (
+from maxlevel.browser.chrome_mcp.executor import (
     ExecutionPlan,
     create_workflow_plan,
     connect_workflow_plan,
     navigate_to_ai_settings_plan,
     capture_agent_details_plan,
 )
-from ghl_assistant.browser.chrome_mcp.tasks import TaskStep
+from maxlevel.browser.chrome_mcp.tasks import TaskStep
 
 
 class TestExecutionPlan:

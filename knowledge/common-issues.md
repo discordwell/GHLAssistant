@@ -189,7 +189,7 @@
 
 ## Quick Diagnostic Commands
 
-For developers using GHL Assistant CLI:
+For developers using MaxLevel CLI:
 
 ```bash
 # Check authentication status

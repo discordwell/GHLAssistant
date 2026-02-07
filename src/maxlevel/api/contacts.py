@@ -48,7 +48,7 @@ class ContactsAPI:
         """Get location ID or raise error."""
         lid = self._client.config.location_id
         if not lid:
-            raise ValueError("location_id required. Set via config or run 'ghl auth login'")
+            raise ValueError("location_id required. Set via config or run 'maxlevel auth login'")
         return lid
 
     # =========================================================================

@@ -4,7 +4,7 @@ Provides OAuth 2.0 Authorization Code flow for GHL Private Marketplace Apps.
 This is the recommended method for production agency automation.
 
 Usage:
-    from ghl_assistant.oauth import OAuthClient, TokenStorage
+    from maxlevel.oauth import OAuthClient, TokenStorage
 
     # Setup OAuth client
     client = OAuthClient.from_config()

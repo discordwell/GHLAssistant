@@ -4,7 +4,7 @@ import pytest
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from ghl_assistant.oauth.client import (
+from maxlevel.oauth.client import (
     OAuthClient,
     OAuthTokens,
     OAuthError,
@@ -12,7 +12,7 @@ from ghl_assistant.oauth.client import (
     GHL_AUTH_URL,
     GHL_TOKEN_URL,
 )
-from ghl_assistant.oauth.storage import TokenStorage, OAuthConfig
+from maxlevel.oauth.storage import TokenStorage, OAuthConfig
 
 
 class TestOAuthTokens:
@@ -135,7 +135,7 @@ class TestOAuthClient:
             OAuthClient.from_config(temp_storage)
 
         assert exc_info.value.error_code == "not_configured"
-        assert "ghl oauth setup" in str(exc_info.value)
+        assert "maxlevel oauth setup" in str(exc_info.value)
 
     def test_from_credentials_saves_config(self, temp_storage):
         """Should save config when save=True."""

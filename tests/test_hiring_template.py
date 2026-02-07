@@ -2,7 +2,7 @@
 
 import pytest
 
-from ghl_assistant.hiring.template import (
+from maxlevel.hiring.template import (
     DEFAULT_STAGES,
     HIRING_CUSTOM_FIELDS,
     HIRING_CUSTOM_VALUES,
@@ -10,7 +10,7 @@ from ghl_assistant.hiring.template import (
     SCREENING_AGENT_PROMPT,
     get_hiring_blueprint,
 )
-from ghl_assistant.blueprint.models import (
+from maxlevel.blueprint.models import (
     CustomFieldSpec,
     CustomValueSpec,
     LocationBlueprint,

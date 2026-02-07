@@ -21,7 +21,7 @@ ghl workflows list
 ## Python Client
 
 ```python
-from ghl_assistant.api import GHLClient
+from maxlevel.api import GHLClient
 
 async with GHLClient.from_session() as ghl:
     # All APIs available via properties

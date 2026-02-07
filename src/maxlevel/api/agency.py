@@ -48,7 +48,7 @@ class AgencyAPI:
         """Get company ID or raise error."""
         cid = self._client.config.company_id
         if not cid:
-            raise ValueError("company_id required. Set via config or run 'ghl auth login'")
+            raise ValueError("company_id required. Set via config or run 'maxlevel auth login'")
         return cid
 
     # =========================================================================

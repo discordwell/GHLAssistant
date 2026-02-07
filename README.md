@@ -1,4 +1,4 @@
-# GHL Assistant
+# MaxLevel
 
 GoHighLevel automation toolkit - Python API client and Claude Code integration.
 
@@ -32,7 +32,7 @@ Since GHL's OAuth key creation is broken, we capture auth from the browser:
 source venv/bin/activate
 python -c "
 import asyncio
-from ghl_assistant.browser.agent import run_capture_session
+from maxlevel.browser.agent import run_capture_session
 asyncio.run(run_capture_session(
     url='https://app.gohighlevel.com/',
     profile='ghl_session',
@@ -47,7 +47,7 @@ This opens a browser - log into GHL, and the session will be captured automatica
 
 ```python
 import asyncio
-from ghl_assistant.api import GHLClient
+from maxlevel.api import GHLClient
 
 async def main():
     async with GHLClient.from_session() as ghl:
@@ -154,7 +154,7 @@ Then use `/ghl` in Claude Code for GHL operations.
 
 ```
 GHLAssistant/
-├── src/ghl_assistant/
+├── src/maxlevel/
 │   ├── api/
 │   │   ├── client.py        # Main GHLClient
 │   │   ├── contacts.py      # Contacts API

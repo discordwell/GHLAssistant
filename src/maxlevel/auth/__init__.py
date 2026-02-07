@@ -1,9 +1,9 @@
-"""Authentication module for GHL Assistant.
+"""Authentication module for MaxLevel.
 
 Provides unified token management across OAuth and session-based auth.
 
 Usage:
-    from ghl_assistant.auth import TokenManager
+    from maxlevel.auth import TokenManager
 
     # Get a valid token (OAuth preferred, falls back to session)
     manager = TokenManager()

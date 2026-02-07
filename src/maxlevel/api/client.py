@@ -60,7 +60,7 @@ class GHLConfig:
             sessions = sorted(log_dir.glob("session_*.json"))
             if not sessions:
                 raise FileNotFoundError(
-                    "No session files found. Run 'ghl auth quick' first."
+                    "No session files found. Run 'maxlevel auth quick' first."
                 )
             filepath = sessions[-1]
 

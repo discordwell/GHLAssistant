@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from ghl_assistant.api.conversation_ai import ConversationAIAPI
+from maxlevel.api.conversation_ai import ConversationAIAPI
 from tests.conftest import (
     SAMPLE_LOCATION_ID,
     SAMPLE_AGENT_ID,

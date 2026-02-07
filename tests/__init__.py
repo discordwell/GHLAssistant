@@ -1,1 +1,1 @@
-"""GHL Assistant Test Suite."""
+"""MaxLevel Test Suite."""

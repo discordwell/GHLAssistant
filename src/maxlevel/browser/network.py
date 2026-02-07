@@ -244,7 +244,7 @@ class NetworkCapture:
         har = {
             "log": {
                 "version": "1.2",
-                "creator": {"name": "GHL Assistant", "version": "0.1.0"},
+                "creator": {"name": "MaxLevel", "version": "0.1.0"},
                 "entries": [],
             }
         }

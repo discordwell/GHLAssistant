@@ -1,4 +1,4 @@
-"""GHL Assistant CLI - Main entry point."""
+"""MaxLevel CLI - Main entry point."""
 
 import asyncio
 import json
@@ -10,8 +10,8 @@ from rich.panel import Panel
 from rich.table import Table
 
 app = typer.Typer(
-    name="ghl",
-    help="GoHighLevel automation assistant - CLI tools, templates, and wizards",
+    name="maxlevel",
+    help="MaxLevel — GoHighLevel automation platform",
     no_args_is_help=True,
 )
 console = Console()
@@ -175,7 +175,7 @@ def auth_quick(
                     f"[bold green]Session captured successfully![/bold green]\n\n"
                     f"Location ID: {result.get('location_id', 'N/A')}\n"
                     f"Company ID: {result.get('company_id', 'N/A')}\n\n"
-                    "[dim]You can now use 'ghl contacts list' and other API commands.[/dim]",
+                    "[dim]You can now use 'maxlevel contacts list' and other API commands.[/dim]",
                     title="Auth Complete",
                 )
             )
@@ -225,11 +225,11 @@ def auth_status():
     elif status.get("oauth_configured"):
         console.print(f"\n[bold cyan]OAuth[/bold cyan]")
         console.print(f"  Status: [yellow]Configured but no token[/yellow]")
-        console.print(f"  [dim]Run 'ghl oauth connect' to authenticate[/dim]")
+        console.print(f"  [dim]Run 'maxlevel oauth connect' to authenticate[/dim]")
     else:
         console.print(f"\n[bold cyan]OAuth[/bold cyan]")
         console.print(f"  Status: [dim]Not configured[/dim]")
-        console.print(f"  [dim]Run 'ghl oauth setup' to configure[/dim]")
+        console.print(f"  [dim]Run 'maxlevel oauth setup' to configure[/dim]")
 
     # Session token status
     session_info = status.get("session_token")
@@ -251,7 +251,7 @@ def auth_status():
     else:
         console.print(f"\n[bold cyan]Session Token[/bold cyan]")
         console.print(f"  Status: [dim]Not available[/dim]")
-        console.print(f"  [dim]Run 'ghl auth quick' to capture[/dim]")
+        console.print(f"  [dim]Run 'maxlevel auth quick' to capture[/dim]")
 
     # Summary
     has_auth = oauth_info or session_info
@@ -259,7 +259,7 @@ def auth_status():
         console.print(f"\n[green]API access: Ready[/green]")
     else:
         console.print(f"\n[red]API access: Not authenticated[/red]")
-        console.print("[dim]Run 'ghl oauth connect' (recommended) or 'ghl auth quick'[/dim]")
+        console.print("[dim]Run 'maxlevel oauth connect' (recommended) or 'maxlevel auth quick'[/dim]")
 
 
 @auth_app.command("clear")
@@ -349,7 +349,7 @@ def auth_bridge(
                 f"[bold green]Token captured successfully![/bold green]\n\n"
                 f"Company ID: {token_data.get('companyId', 'N/A')}\n"
                 f"User ID: {token_data.get('userId', 'N/A')}\n\n"
-                "[dim]You can now use 'ghl contacts list' and other API commands.[/dim]",
+                "[dim]You can now use 'maxlevel contacts list' and other API commands.[/dim]",
                 title="Auth Complete",
             )
         )
@@ -430,7 +430,7 @@ def oauth_setup(
             f"Client ID: {client_id[:8]}...{client_id[-4:]}\n"
             f"Redirect URI: {redirect_uri}\n"
             f"Scopes: {', '.join(scope_list) if scope_list else 'All available'}\n\n"
-            "[dim]Run 'ghl oauth connect' to complete authentication[/dim]",
+            "[dim]Run 'maxlevel oauth connect' to complete authentication[/dim]",
             title="Setup Complete",
         )
     )
@@ -451,7 +451,7 @@ def oauth_connect(
     storage = TokenStorage()
 
     if not storage.has_oauth_config():
-        console.print("[red]OAuth not configured. Run 'ghl oauth setup' first.[/red]")
+        console.print("[red]OAuth not configured. Run 'maxlevel oauth setup' first.[/red]")
         raise typer.Exit(1)
 
     try:
@@ -508,12 +508,12 @@ def oauth_status():
     status = storage.get_status()
 
     if not status.get("oauth_configured"):
-        console.print("[yellow]OAuth not configured. Run 'ghl oauth setup' first.[/yellow]")
+        console.print("[yellow]OAuth not configured. Run 'maxlevel oauth setup' first.[/yellow]")
         return
 
     oauth_info = status.get("oauth_token")
     if not oauth_info:
-        console.print("[yellow]No OAuth token. Run 'ghl oauth connect' to authenticate.[/yellow]")
+        console.print("[yellow]No OAuth token. Run 'maxlevel oauth connect' to authenticate.[/yellow]")
         return
 
     if oauth_info["valid"]:
@@ -536,7 +536,7 @@ def oauth_status():
             Panel(
                 "[bold yellow]OAuth Token Expired[/bold yellow]\n\n"
                 "The token will be automatically refreshed on next API call.\n"
-                "Or run 'ghl oauth refresh' to refresh now.",
+                "Or run 'maxlevel oauth refresh' to refresh now.",
                 title="OAuth Status",
             )
         )
@@ -551,7 +551,7 @@ def oauth_refresh():
     data = storage.load()
 
     if not data.oauth:
-        console.print("[red]No OAuth token to refresh. Run 'ghl oauth connect' first.[/red]")
+        console.print("[red]No OAuth token to refresh. Run 'maxlevel oauth connect' first.[/red]")
         raise typer.Exit(1)
 
     try:
@@ -570,7 +570,7 @@ def oauth_refresh():
 
     except OAuthError as e:
         console.print(f"[red]Refresh failed: {e}[/red]")
-        console.print("[dim]You may need to run 'ghl oauth connect' again.[/dim]")
+        console.print("[dim]You may need to run 'maxlevel oauth connect' again.[/dim]")
         raise typer.Exit(1)
 
 
@@ -590,7 +590,7 @@ def oauth_revoke(
     storage.clear_oauth()
 
     console.print("[green]OAuth tokens revoked.[/green]")
-    console.print("[dim]Run 'ghl oauth connect' to reconnect.[/dim]")
+    console.print("[dim]Run 'maxlevel oauth connect' to reconnect.[/dim]")
 
 
 # ============================================================================
@@ -855,7 +855,7 @@ def browser_token(
 
             # Check if logged in
             if not await agent.is_logged_in():
-                return {"success": False, "error": "Not logged in. Run 'ghl browser capture' first."}
+                return {"success": False, "error": "Not logged in. Run 'maxlevel browser capture' first."}
 
             # Wait a moment for API calls
             await asyncio.sleep(3)
@@ -1962,7 +1962,7 @@ def voice_get(
 @voice_app.command("create")
 def voice_create(
     name: str = typer.Argument(..., help="Agent name"),
-    voice_id: str = typer.Argument(..., help="Voice profile ID (use 'ghl voice voices' to list)"),
+    voice_id: str = typer.Argument(..., help="Voice profile ID (use 'maxlevel voice voices' to list)"),
     prompt: str = typer.Option(None, "--prompt", "-p", help="System prompt"),
     greeting: str = typer.Option(None, "--greeting", "-g", help="Initial greeting"),
     model: str = typer.Option("gpt-4", "--model", "-m", help="AI model"),
@@ -2781,7 +2781,7 @@ def hiring_add_applicant(
                      result["opportunity"].get("id", "N/A"))
             console.print(f"  Opportunity ID: {opp_id}")
         else:
-            console.print("  [yellow]No hiring pipeline found - create one via 'ghl hiring setup'[/yellow]")
+            console.print("  [yellow]No hiring pipeline found - create one via 'maxlevel hiring setup'[/yellow]")
 
 
 @hiring_app.command("list")
@@ -3265,7 +3265,7 @@ def hiring_audit(
 
 @hiring_app.command("serve")
 def hiring_serve(
-    port: int = typer.Option(8000, "--port", "-p", help="Port to run on"),
+    port: int = typer.Option(8021, "--port", "-p", help="Port to run on"),
     host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to"),
 ):
     """Launch the hiring tool web UI."""
@@ -3286,7 +3286,7 @@ def hiring_serve(
 
 @crm_app.command("serve")
 def crm_serve(
-    port: int = typer.Option(8000, "--port", "-p", help="Port to run on"),
+    port: int = typer.Option(8020, "--port", "-p", help="Port to run on"),
     host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to"),
 ):
     """Launch the CRM platform web UI."""
@@ -3520,7 +3520,7 @@ def version():
     """Show version information."""
     from . import __version__
 
-    console.print(f"GHL Assistant v{__version__}")
+    console.print(f"MaxLevel v{__version__}")
 
 
 if __name__ == "__main__":

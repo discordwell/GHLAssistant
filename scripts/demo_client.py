@@ -8,7 +8,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from ghl_assistant.api import GHLClient, GHLConfig
+from maxlevel.api import GHLClient, GHLConfig
 
 
 async def main():
@@ -16,7 +16,7 @@ async def main():
     log_dir = Path(__file__).parent.parent / "data" / "network_logs"
     sessions = sorted(log_dir.glob("session_*.json"))
     if not sessions:
-        print("No sessions found! Run 'ghl browser capture' first.")
+        print("No sessions found! Run 'maxlevel browser capture' first.")
         return
 
     session_file = sessions[-1]

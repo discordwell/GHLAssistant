@@ -4,8 +4,8 @@ import pytest
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from ghl_assistant.auth.manager import TokenManager, TokenInfo, NoTokenError
-from ghl_assistant.oauth.storage import (
+from maxlevel.auth.manager import TokenManager, TokenInfo, NoTokenError
+from maxlevel.oauth.storage import (
     TokenStorage,
     OAuthTokenData,
     SessionTokenData,
@@ -92,8 +92,8 @@ class TestTokenManager:
         with pytest.raises(NoTokenError) as exc_info:
             await manager.get_token()
 
-        assert "ghl oauth connect" in str(exc_info.value)
-        assert "ghl auth quick" in str(exc_info.value)
+        assert "maxlevel oauth connect" in str(exc_info.value)
+        assert "maxlevel auth quick" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_get_token_returns_oauth_when_valid(self, manager, temp_storage):
@@ -201,7 +201,7 @@ class TestTokenManager:
         temp_storage.save_oauth_tokens(oauth)
 
         # Mock the OAuth client's refresh method
-        with patch("ghl_assistant.auth.manager.OAuthClient") as MockClient:
+        with patch("maxlevel.auth.manager.OAuthClient") as MockClient:
             mock_client = MagicMock()
             MockClient.from_config.return_value = mock_client
 
@@ -311,9 +311,9 @@ class TestNoTokenError:
         error = NoTokenError()
         message = str(error)
 
-        assert "ghl oauth connect" in message
-        assert "ghl auth quick" in message
-        assert "ghl auth bridge" in message
+        assert "maxlevel oauth connect" in message
+        assert "maxlevel auth quick" in message
+        assert "maxlevel auth bridge" in message
 
     def test_custom_message(self):
         """Should allow custom message."""

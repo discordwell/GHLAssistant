@@ -1,4 +1,4 @@
-# GHL Assistant Architecture
+# MaxLevel Architecture
 
 ## Vision
 
@@ -29,7 +29,7 @@ GHLAssistant/
 │   │   └── common-workflows.md
 │   └── ARCHITECTURE.md         # This file
 │
-├── src/ghl_assistant/
+├── src/maxlevel/
 │   ├── __init__.py
 │   ├── cli.py                  # Main CLI entry point
 │   │
@@ -76,12 +76,12 @@ GHLAssistant/
 
 ## Core Components
 
-### 1. API Client (`src/ghl_assistant/api/`)
+### 1. API Client (`src/maxlevel/api/`)
 
 Modular async client with domain-specific classes:
 
 ```python
-from ghl_assistant.api import GHLClient
+from maxlevel.api import GHLClient
 
 async with GHLClient.from_session("session.json") as ghl:
     # Domain-specific APIs
@@ -97,7 +97,7 @@ async with GHLClient.from_session("session.json") as ghl:
     await ghl.workflows.add_contact(workflow_id, contact.id)
 ```
 
-### 2. CLI Commands (`src/ghl_assistant/commands/`)
+### 2. CLI Commands (`src/maxlevel/commands/`)
 
 Typer-based CLI mirroring the API structure:
 

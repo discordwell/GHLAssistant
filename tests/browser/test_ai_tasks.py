@@ -3,8 +3,8 @@
 import pytest
 from unittest.mock import MagicMock
 
-from ghl_assistant.browser.chrome_mcp.ai_tasks import AIBrowserTasks
-from ghl_assistant.browser.chrome_mcp.tasks import TaskStep
+from maxlevel.browser.chrome_mcp.ai_tasks import AIBrowserTasks
+from maxlevel.browser.chrome_mcp.tasks import TaskStep
 
 
 class TestAIBrowserTasks:

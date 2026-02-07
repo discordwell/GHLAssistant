@@ -121,7 +121,7 @@ class OAuthClient:
 
         if not config:
             raise OAuthError(
-                "OAuth not configured. Run 'ghl oauth setup' first.",
+                "OAuth not configured. Run 'maxlevel oauth setup' first.",
                 error_code="not_configured",
             )
 

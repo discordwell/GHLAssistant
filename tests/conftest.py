@@ -1,4 +1,4 @@
-"""Shared test fixtures for GHL Assistant test suite."""
+"""Shared test fixtures for MaxLevel test suite."""
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -114,7 +114,7 @@ MOCK_SETTINGS = {
 @pytest.fixture
 def mock_config():
     """Create a mock GHLConfig."""
-    from ghl_assistant.api.client import GHLConfig
+    from maxlevel.api.client import GHLConfig
     return GHLConfig(
         token="test_token_abc123",
         user_id=SAMPLE_USER_ID,
@@ -146,10 +146,10 @@ def mock_http_client():
 @pytest.fixture
 def mock_ghl_client(mock_config, mock_http_client):
     """Create a mock GHLClient with initialized APIs."""
-    from ghl_assistant.api.client import GHLClient
-    from ghl_assistant.api.conversation_ai import ConversationAIAPI
-    from ghl_assistant.api.voice_ai import VoiceAIAPI
-    from ghl_assistant.api.agency import AgencyAPI
+    from maxlevel.api.client import GHLClient
+    from maxlevel.api.conversation_ai import ConversationAIAPI
+    from maxlevel.api.voice_ai import VoiceAIAPI
+    from maxlevel.api.agency import AgencyAPI
 
     client = GHLClient(mock_config)
     client._client = mock_http_client

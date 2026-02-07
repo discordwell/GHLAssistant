@@ -97,7 +97,7 @@ def _ghl_contact_to_candidate_fields(contact: dict) -> dict:
 async def push_all_to_ghl(db: Session) -> dict:
     """Push all local candidates to GHL."""
     try:
-        from ghl_assistant.api import GHLClient
+        from maxlevel.api import GHLClient
     except ImportError:
         return {"synced": 0, "total": 0, "message": "GHL client not available"}
 
@@ -204,7 +204,7 @@ async def push_all_to_ghl(db: Session) -> dict:
 async def pull_from_ghl(db: Session) -> dict:
     """Pull candidates from GHL hiring pipeline."""
     try:
-        from ghl_assistant.api import GHLClient
+        from maxlevel.api import GHLClient
     except ImportError:
         return {"synced": 0, "total": 0, "message": "GHL client not available"}
 

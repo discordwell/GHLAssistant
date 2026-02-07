@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
-from ghl_assistant.oauth.storage import (
+from maxlevel.oauth.storage import (
     TokenStorage,
     TokenStorageData,
     OAuthTokenData,

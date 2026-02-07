@@ -24,9 +24,9 @@ class NoTokenError(Exception):
         default_msg = (
             "No valid authentication token found.\n\n"
             "Options:\n"
-            "  1. Run 'ghl oauth connect' for OAuth authentication (recommended)\n"
-            "  2. Run 'ghl auth quick' for session-based authentication\n"
-            "  3. Run 'ghl auth bridge' to capture token via bookmarklet"
+            "  1. Run 'maxlevel oauth connect' for OAuth authentication (recommended)\n"
+            "  2. Run 'maxlevel auth quick' for session-based authentication\n"
+            "  3. Run 'maxlevel auth bridge' to capture token via bookmarklet"
         )
         super().__init__(message or default_msg)
 
@@ -335,7 +335,7 @@ class TokenManager:
             sessions = sorted(log_dir.glob("session_*.json"))
             if not sessions:
                 raise FileNotFoundError(
-                    "No session files found. Run 'ghl auth quick' or 'ghl browser capture' first."
+                    "No session files found. Run 'maxlevel auth quick' or 'maxlevel browser capture' first."
                 )
             filepath = sessions[-1]
 

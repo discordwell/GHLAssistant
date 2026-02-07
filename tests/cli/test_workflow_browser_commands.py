@@ -3,11 +3,11 @@
 import pytest
 from typer.testing import CliRunner
 
-from ghl_assistant.cli import app
+from maxlevel.cli import app
 
 
 class TestWorkflowsCreateForAICommand:
-    """Tests for 'ghl workflows create-for-ai' command."""
+    """Tests for 'maxlevel workflows create-for-ai' command."""
 
     def test_create_for_ai_dry_run(self, cli_runner):
         """Test dry run shows plan without executing."""
@@ -109,7 +109,7 @@ class TestWorkflowsCreateForAICommand:
 
 
 class TestWorkflowsConnectAICommand:
-    """Tests for 'ghl workflows connect-ai' command."""
+    """Tests for 'maxlevel workflows connect-ai' command."""
 
     def test_connect_ai_dry_run(self, cli_runner):
         """Test dry run shows plan without executing."""

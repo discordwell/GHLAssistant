@@ -103,7 +103,7 @@ async def test_push_without_ghl_client(db: Session):
     db.add(Candidate(first_name="A", last_name="B"))
     db.commit()
 
-    with patch.dict("sys.modules", {"ghl_assistant": None, "ghl_assistant.api": None}):
+    with patch.dict("sys.modules", {"maxlevel": None, "maxlevel.api": None}):
         result = await push_all_to_ghl(db)
     assert result["message"] == "GHL client not available"
 
@@ -111,6 +111,6 @@ async def test_push_without_ghl_client(db: Session):
 @pytest.mark.asyncio
 async def test_pull_without_ghl_client(db: Session):
     """Pull should gracefully handle missing GHL client."""
-    with patch.dict("sys.modules", {"ghl_assistant": None, "ghl_assistant.api": None}):
+    with patch.dict("sys.modules", {"maxlevel": None, "maxlevel.api": None}):
         result = await pull_from_ghl(db)
     assert result["message"] == "GHL client not available"

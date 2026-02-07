@@ -3,7 +3,7 @@ name: ghl
 description: GoHighLevel CRM automation - manage contacts, workflows, calendars, and more
 ---
 
-# GHL Assistant Skill
+# MaxLevel Skill
 
 You are helping the user automate GoHighLevel (GHL) CRM operations. You have access to a Python API client and CLI tools.
 
@@ -19,7 +19,7 @@ ls data/network_logs/session_*.json 2>/dev/null | tail -1
 source venv/bin/activate
 python -c "
 import asyncio
-from ghl_assistant.browser.agent import run_capture_session
+from maxlevel.browser.agent import run_capture_session
 asyncio.run(run_capture_session(
     url='https://app.gohighlevel.com/',
     profile='ghl_session',
@@ -34,7 +34,7 @@ Always use the async context manager:
 
 ```python
 import asyncio
-from ghl_assistant.api import GHLClient
+from maxlevel.api import GHLClient
 
 async def main():
     async with GHLClient.from_session() as ghl:

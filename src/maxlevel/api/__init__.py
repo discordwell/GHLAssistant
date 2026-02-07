@@ -1,7 +1,7 @@
 """GHL API client module.
 
 Usage with TokenManager (recommended - supports OAuth with auto-refresh):
-    from ghl_assistant.api import GHLClient
+    from maxlevel.api import GHLClient
 
     async with GHLClient.from_session() as ghl:
         # Automatically uses OAuth if available, falls back to session token
@@ -17,7 +17,7 @@ Usage with TokenManager (recommended - supports OAuth with auto-refresh):
         # And more...
 
 For direct TokenManager access:
-    from ghl_assistant.auth import TokenManager
+    from maxlevel.auth import TokenManager
 
     manager = TokenManager()
     token = await manager.get_token()  # Gets valid token, auto-refreshes OAuth

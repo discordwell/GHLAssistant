@@ -19,7 +19,7 @@ from .exporter import export_tags, export_contacts, export_opportunities
 
 async def _get_ghl_client():
     """Get an authenticated GHL client."""
-    from ghl_assistant.api import GHLClient
+    from maxlevel.api import GHLClient
     return GHLClient.from_session()
 
 
@@ -29,7 +29,7 @@ async def preview_import(ghl_location_id: str) -> ImportPreview:
 
     async with await _get_ghl_client() as ghl:
         # Snapshot config
-        from ghl_assistant.blueprint.engine import snapshot_location
+        from maxlevel.blueprint.engine import snapshot_location
         snap = await snapshot_location(ghl, location_id=ghl_location_id)
         bp = snap.blueprint
 
@@ -68,7 +68,7 @@ async def run_import(db: AsyncSession, location: Location) -> SyncResult:
         lid = location.ghl_location_id
 
         # 1. Import config via snapshot
-        from ghl_assistant.blueprint.engine import snapshot_location
+        from maxlevel.blueprint.engine import snapshot_location
         snap = await snapshot_location(ghl, location_id=lid)
         bp = snap.blueprint
 
