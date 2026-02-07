@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import html
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -142,7 +144,7 @@ async def reply_sms(
         )
     except Exception as e:
         return HTMLResponse(
-            f'<div class="text-red-600 text-sm">Failed to send: {e}</div>',
+            f'<div class="text-red-600 text-sm">Failed to send: {html.escape(str(e))}</div>',
             status_code=500,
         )
 
@@ -169,6 +171,6 @@ async def reply_email(
         )
     except Exception as e:
         return HTMLResponse(
-            f'<div class="text-red-600 text-sm">Failed to send: {e}</div>',
+            f'<div class="text-red-600 text-sm">Failed to send: {html.escape(str(e))}</div>',
             status_code=500,
         )

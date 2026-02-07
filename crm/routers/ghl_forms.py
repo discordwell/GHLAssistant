@@ -72,20 +72,6 @@ async def form_submissions(
         except Exception as e:
             ghl_error = f"Failed to load submissions: {e}"
 
-    # HTMX partial response
-    if request.headers.get("HX-Request"):
-        return templates.TemplateResponse("ghl_forms/list.html", {
-            "request": request,
-            "location": location,
-            "locations": await _all_locations(db),
-            "forms": [],
-            "submissions": submissions,
-            "total_submissions": total,
-            "selected_form_id": form_id,
-            "page": page,
-            "ghl_error": ghl_error,
-        })
-
     return templates.TemplateResponse("ghl_forms/list.html", {
         "request": request,
         "location": location,

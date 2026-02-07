@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import html
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -120,7 +122,7 @@ async def book(
         )
     except Exception as e:
         return HTMLResponse(
-            f'<div class="text-red-600 text-sm">Booking failed: {e}</div>',
+            f'<div class="text-red-600 text-sm">Booking failed: {html.escape(str(e))}</div>',
             status_code=500,
         )
 
@@ -139,6 +141,6 @@ async def cancel(
         )
     except Exception as e:
         return HTMLResponse(
-            f'<div class="text-red-600 text-sm">Cancel failed: {e}</div>',
+            f'<div class="text-red-600 text-sm">Cancel failed: {html.escape(str(e))}</div>',
             status_code=500,
         )
