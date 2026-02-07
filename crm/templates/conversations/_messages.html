@@ -1,77 +1,43 @@
-{% if ghl_error %}
-<div class="p-4 text-sm text-red-600">{{ ghl_error }}</div>
-{% else %}
 <div class="flex flex-col h-full">
-    <!-- Messages -->
-    <div class="flex-1 overflow-y-auto p-4 space-y-3">
-        {% if messages %}
-            {% for msg in messages %}
-            <div class="{% if msg.get('direction') == 'outbound' %}ml-8{% else %}mr-8{% endif %}">
-                <div class="rounded-lg p-3 text-sm
-                    {% if msg.get('direction') == 'outbound' %}bg-indigo-50 text-indigo-900{% else %}bg-gray-100 text-gray-900{% endif %}">
-                    <p>{{ msg.get("body", msg.get("message", "")) }}</p>
-                </div>
-                <div class="flex items-center gap-2 mt-1">
-                    <span class="text-xs text-gray-400">
-                        {{ msg.get("dateAdded", msg.get("createdAt", ""))[:16] }}
-                    </span>
-                    <span class="text-xs text-gray-400">
-                        {{ msg.get("type", "") }}
-                    </span>
-                    {% if msg.get("direction") == "outbound" %}
-                    <span class="text-xs text-indigo-500">Sent</span>
-                    {% endif %}
-                </div>
+    <div class="px-4 py-3 border-b bg-gray-50">
+        <div class="flex items-center justify-between">
+            <div>
+                <span class="font-medium text-gray-900">{% if contact %}{{ contact.full_name }}{% else %}Unknown{% endif %}</span>
+                <span class="text-xs text-gray-400 ml-2">{{ conversation.channel }}</span>
             </div>
-            {% endfor %}
-        {% else %}
-        <div class="text-center text-gray-400 text-sm py-8">No messages in this conversation.</div>
-        {% endif %}
+            <form hx-post="/loc/{{ location.slug }}/conversations/{{ conversation.id }}/read" hx-swap="none">
+                <button type="submit" class="text-xs text-indigo-600 hover:underline">Mark Read</button>
+            </form>
+        </div>
     </div>
-
-    <!-- Reply Form -->
-    {% if contact_id %}
-    <div class="border-t p-4 bg-gray-50">
-        <div id="reply-result" class="mb-2"></div>
-
-        <!-- SMS Form -->
-        <div id="sms-form">
-            <form hx-post="/loc/{{ location.slug }}/conversations/{{ contact_id }}/sms"
-                  hx-target="#reply-result" hx-swap="innerHTML"
-                  class="flex gap-2">
-                <input type="text" name="message" placeholder="Type SMS message..."
-                    class="flex-1 rounded border-gray-300 text-sm px-3 py-2 border" required>
-                <button type="submit" class="bg-indigo-600 text-white text-sm px-4 py-2 rounded hover:bg-indigo-700">
-                    Send SMS
-                </button>
-                <button type="button" onclick="document.getElementById('sms-form').style.display='none'; document.getElementById('email-form').style.display='block';"
-                    class="text-sm text-gray-500 hover:text-gray-700 px-2">
-                    Email
-                </button>
-            </form>
+    <div class="flex-1 overflow-y-auto p-4 space-y-3">
+        {% for msg in messages %}
+        <div class="{% if msg.direction == 'outbound' %}ml-auto bg-indigo-100{% else %}mr-auto bg-gray-100{% endif %} rounded-lg px-4 py-2 max-w-[75%]">
+            {% if msg.subject %}<div class="text-xs font-medium text-gray-700 mb-1">{{ msg.subject }}</div>{% endif %}
+            <div class="text-sm text-gray-800">{{ msg.body or '' }}</div>
+            <div class="text-xs text-gray-400 mt-1">{{ msg.created_at.strftime('%b %d, %H:%M') }} &middot; {{ msg.status }}</div>
         </div>
-
-        <!-- Email Form (hidden by default) -->
-        <div id="email-form" style="display: none;">
-            <form hx-post="/loc/{{ location.slug }}/conversations/{{ contact_id }}/email"
-                  hx-target="#reply-result" hx-swap="innerHTML"
-                  class="space-y-2">
-                <input type="text" name="subject" placeholder="Subject"
-                    class="w-full rounded border-gray-300 text-sm px-3 py-2 border" required>
-                <textarea name="body" placeholder="Email body (HTML supported)..." rows="3"
-                    class="w-full rounded border-gray-300 text-sm px-3 py-2 border" required></textarea>
-                <div class="flex gap-2">
-                    <button type="submit" class="bg-indigo-600 text-white text-sm px-4 py-2 rounded hover:bg-indigo-700">
-                        Send Email
-                    </button>
-                    <button type="button" onclick="document.getElementById('email-form').style.display='none'; document.getElementById('sms-form').style.display='block';"
-                        class="text-sm text-gray-500 hover:text-gray-700 px-2">
-                        SMS
-                    </button>
-                </div>
-            </form>
-        </div>
+        {% else %}
+        <div class="text-gray-400 text-center text-sm">No messages</div>
+        {% endfor %}
+    </div>
+    {% if contact %}
+    <div class="border-t p-4 space-y-3">
+        {% if sms_configured and contact.phone %}
+        <form hx-post="/loc/{{ location.slug }}/conversations/{{ contact.id }}/sms" hx-target="#sms-result" class="flex gap-2">
+            <input type="text" name="message" placeholder="Type SMS..." class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700">SMS</button>
+        </form>
+        <div id="sms-result"></div>
+        {% endif %}
+        {% if email_configured and contact.email %}
+        <form hx-post="/loc/{{ location.slug }}/conversations/{{ contact.id }}/email" hx-target="#email-result" class="space-y-2">
+            <input type="text" name="subject" placeholder="Subject" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            <textarea name="body" placeholder="Email body..." rows="3" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"></textarea>
+            <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700">Send Email</button>
+        </form>
+        <div id="email-result"></div>
+        {% endif %}
     </div>
     {% endif %}
 </div>
-{% endif %}

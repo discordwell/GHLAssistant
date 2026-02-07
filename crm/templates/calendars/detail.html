@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}{{ calendar.name }} - {{ location.name }}{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+    <div>
+        <a href="/loc/{{ location.slug }}/calendars/" class="text-sm text-indigo-600 hover:underline">&larr; Back</a>
+        <h1 class="text-2xl font-bold text-gray-900 mt-1">{{ calendar.name }}</h1>
+        <p class="text-sm text-gray-500">{{ calendar.description or '' }} &middot; {{ calendar.slot_duration }}min slots &middot; {{ calendar.timezone }}</p>
+    </div>
+    <div class="flex gap-2">
+        <form method="post" action="/loc/{{ location.slug }}/calendars/{{ calendar.id }}/delete" onsubmit="return confirm('Delete this calendar?')">
+            <button type="submit" class="bg-red-100 text-red-700 px-3 py-2 rounded-lg text-sm hover:bg-red-200">Delete</button>
+        </form>
+    </div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Availability -->
+    <div class="bg-white rounded-lg shadow p-4">
+        <h2 class="font-medium text-gray-900 mb-3">Availability Windows</h2>
+        <div class="space-y-2 mb-4">
+            {% for w in calendar.availability_windows %}
+            <div class="flex items-center justify-between bg-gray-50 rounded px-3 py-2 text-sm">
+                <span>{{ day_names[w.day_of_week] }} {{ w.start_time.strftime('%H:%M') }} - {{ w.end_time.strftime('%H:%M') }}</span>
+                <form method="post" action="/loc/{{ location.slug }}/calendars/{{ calendar.id }}/availability/{{ w.id }}/delete">
+                    <button type="submit" class="text-red-600 hover:underline text-xs">Remove</button>
+                </form>
+            </div>
+            {% else %}
+            <p class="text-sm text-gray-400">No availability set</p>
+            {% endfor %}
+        </div>
+        <form method="post" action="/loc/{{ location.slug }}/calendars/{{ calendar.id }}/availability" class="flex gap-2 items-end">
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">Day</label>
+                <select name="day_of_week" class="border border-gray-300 rounded px-2 py-1 text-sm">
+                    {% for i in range(7) %}<option value="{{ i }}">{{ day_names[i] }}</option>{% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">Start</label>
+                <input type="time" name="start_time" value="09:00" class="border border-gray-300 rounded px-2 py-1 text-sm">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">End</label>
+                <input type="time" name="end_time" value="17:00" class="border border-gray-300 rounded px-2 py-1 text-sm">
+            </div>
+            <button type="submit" class="bg-indigo-600 text-white px-3 py-1 rounded text-sm hover:bg-indigo-700">Add</button>
+        </form>
+    </div>
+
+    <!-- Slots -->
+    <div class="bg-white rounded-lg shadow p-4">
+        <h2 class="font-medium text-gray-900 mb-3">Available Slots</h2>
+        <form class="flex gap-2 mb-3">
+            <input type="date" name="start" class="border border-gray-300 rounded px-2 py-1 text-sm" id="slot-start">
+            <input type="date" name="end" class="border border-gray-300 rounded px-2 py-1 text-sm" id="slot-end">
+            <button type="button" class="bg-gray-100 text-gray-700 px-3 py-1 rounded text-sm hover:bg-gray-200"
+                    hx-get="/loc/{{ location.slug }}/calendars/{{ calendar.id }}/slots"
+                    hx-include="#slot-start, #slot-end"
+                    hx-target="#slots-result">Load Slots</button>
+        </form>
+        <div id="slots-result"></div>
+    </div>
+</div>
+
+<!-- Appointments -->
+<div class="bg-white rounded-lg shadow p-4 mt-6">
+    <h2 class="font-medium text-gray-900 mb-3">Appointments</h2>
+    <div class="mb-4">
+        <form method="post" action="/loc/{{ location.slug }}/calendars/{{ calendar.id }}/book" class="flex gap-2 items-end flex-wrap">
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">Contact</label>
+                <select name="contact_id" class="border border-gray-300 rounded px-2 py-1 text-sm">
+                    <option value="">Select contact</option>
+                    {% for c in contacts %}<option value="{{ c.id }}">{{ c.full_name }}</option>{% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">Date/Time</label>
+                <input type="datetime-local" name="slot_time" class="border border-gray-300 rounded px-2 py-1 text-sm">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">Title</label>
+                <input type="text" name="title" placeholder="Optional" class="border border-gray-300 rounded px-2 py-1 text-sm">
+            </div>
+            <button type="submit" class="bg-indigo-600 text-white px-3 py-1 rounded text-sm hover:bg-indigo-700">Book</button>
+        </form>
+    </div>
+    <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+            <tr>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Contact</th>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Title</th>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                <th class="px-4 py-2"></th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+            {% for appt in calendar.appointments %}
+            <tr>
+                <td class="px-4 py-2 text-sm">{{ appt.start_time.strftime('%b %d, %H:%M') }} - {{ appt.end_time.strftime('%H:%M') }}</td>
+                <td class="px-4 py-2 text-sm">{% if appt.contact %}{{ appt.contact.full_name }}{% else %}-{% endif %}</td>
+                <td class="px-4 py-2 text-sm">{{ appt.title or '-' }}</td>
+                <td class="px-4 py-2 text-sm">
+                    <span class="px-2 py-0.5 rounded-full text-xs {% if appt.status == 'confirmed' %}bg-green-100 text-green-700{% elif appt.status == 'cancelled' %}bg-red-100 text-red-700{% else %}bg-gray-100 text-gray-600{% endif %}">{{ appt.status }}</span>
+                </td>
+                <td class="px-4 py-2 text-sm">
+                    {% if appt.status != 'cancelled' %}
+                    <form method="post" action="/loc/{{ location.slug }}/calendars/appointments/{{ appt.id }}/cancel" hx-post="/loc/{{ location.slug }}/calendars/appointments/{{ appt.id }}/cancel" hx-swap="outerHTML">
+                        <button type="submit" class="text-red-600 hover:underline text-xs">Cancel</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5" class="px-4 py-8 text-center text-gray-400">No appointments</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

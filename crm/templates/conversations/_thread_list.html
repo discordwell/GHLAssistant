@@ -1,33 +1,23 @@
-{% if ghl_error %}
-<div class="p-4 text-sm text-red-600">{{ ghl_error }}</div>
-{% elif conversations %}
-<div class="divide-y divide-gray-100">
-    {% for conv in conversations %}
-    <div class="p-3 hover:bg-gray-50 cursor-pointer {% if conv.get('unreadCount', 0) > 0 %}bg-indigo-50{% endif %}"
-         hx-get="/loc/{{ location.slug }}/conversations/{{ conv.get('id', conv.get('_id', '')) }}/messages"
-         hx-target="#message-pane"
-         hx-swap="innerHTML">
-        <div class="flex items-center justify-between">
-            <span class="font-medium text-sm text-gray-900 truncate">
-                {{ conv.get("contactName", conv.get("fullName", conv.get("contactId", "Unknown"))) }}
-            </span>
-            {% if conv.get("unreadCount", 0) > 0 %}
-            <span class="bg-indigo-600 text-white text-xs rounded-full px-1.5 py-0.5 min-w-[20px] text-center">
-                {{ conv.unreadCount }}
-            </span>
-            {% endif %}
-        </div>
-        <p class="text-xs text-gray-500 truncate mt-0.5">
-            {{ conv.get("lastMessageBody", conv.get("snippet", ""))[:80] }}
-        </p>
-        <p class="text-xs text-gray-400 mt-0.5">
-            {{ conv.get("lastMessageDate", conv.get("dateUpdated", ""))[:16] }}
-        </p>
+{% for conv in conversations %}
+<div class="px-4 py-3 border-b border-gray-100 hover:bg-indigo-50 cursor-pointer {% if conv.unread_count > 0 %}bg-indigo-50{% endif %}"
+     hx-get="/loc/{{ location.slug }}/conversations/{{ conv.id }}/messages"
+     hx-target="#message-panel">
+    <div class="flex items-center justify-between">
+        <span class="text-sm font-medium text-gray-900">
+            {% if conv.contact %}{{ conv.contact.full_name }}{% else %}Unknown{% endif %}
+        </span>
+        <span class="text-xs text-gray-400">{{ conv.channel }}</span>
     </div>
-    {% endfor %}
+    <div class="flex items-center justify-between mt-1">
+        <span class="text-xs text-gray-500 truncate">{{ conv.subject or '' }}</span>
+        {% if conv.unread_count > 0 %}
+        <span class="bg-indigo-600 text-white text-xs rounded-full px-2 py-0.5">{{ conv.unread_count }}</span>
+        {% endif %}
+    </div>
+    {% if conv.last_message_at %}
+    <div class="text-xs text-gray-400 mt-1">{{ conv.last_message_at.strftime('%b %d, %H:%M') }}</div>
+    {% endif %}
 </div>
 {% else %}
-<div class="p-6 text-center text-gray-400 text-sm">
-    <p>No conversations yet.</p>
-</div>
-{% endif %}
+<div class="p-4 text-gray-400 text-center text-sm">No conversations yet</div>
+{% endfor %}

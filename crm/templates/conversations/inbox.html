@@ -1,30 +1,29 @@
 {% extends "base.html" %}
 {% block title %}Conversations - {{ location.name }}{% endblock %}
-
 {% block content %}
-<div class="space-y-4">
-    <div class="flex items-center justify-between">
-        <h1 class="text-2xl font-bold text-gray-900">Conversations</h1>
-        <span class="text-sm text-gray-500">GHL Live Data</span>
-    </div>
+<div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold text-gray-900">Conversations</h1>
+</div>
 
-    {% if ghl_error %}
-        {% include "partials/ghl_error.html" %}
-    {% else %}
-    <div class="flex gap-4 h-[calc(100vh-220px)] min-h-[400px]">
-        <!-- Thread List (Left Panel) -->
-        <div class="w-1/3 rounded-lg border bg-white overflow-y-auto"
-             hx-get="/loc/{{ location.slug }}/conversations/threads"
-             hx-trigger="every 30s"
-             hx-swap="innerHTML">
-            {% include "conversations/_thread_list.html" %}
-        </div>
+{% if not sms_configured and not email_configured %}
+<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+    <p class="text-sm text-yellow-800">Messaging not configured. Set <code>CRM_TWILIO_*</code> and/or <code>CRM_SENDGRID_*</code> environment variables to enable sending.</p>
+</div>
+{% endif %}
 
-        <!-- Message Pane (Right Panel) -->
-        <div id="message-pane" class="w-2/3 rounded-lg border bg-white overflow-y-auto flex items-center justify-center">
-            <p class="text-gray-400 text-sm">Select a conversation to view messages</p>
+<div class="flex gap-4 h-[calc(100vh-220px)]">
+    <div class="w-1/3 bg-white rounded-lg shadow overflow-y-auto"
+         hx-get="/loc/{{ location.slug }}/conversations/threads"
+         hx-trigger="load, every 30s"
+         hx-target="#thread-list">
+        <div id="thread-list">
+            <div class="p-4 text-gray-400 text-center text-sm">Loading...</div>
         </div>
     </div>
-    {% endif %}
+    <div class="w-2/3 bg-white rounded-lg shadow flex flex-col" id="message-panel">
+        <div class="flex-1 flex items-center justify-center text-gray-400 text-sm">
+            Select a conversation to view messages
+        </div>
+    </div>
 </div>
 {% endblock %}

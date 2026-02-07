@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}{{ funnel.name }} - {{ location.name }}{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+    <div>
+        <a href="/loc/{{ location.slug }}/funnels/" class="text-sm text-indigo-600 hover:underline">&larr; Back</a>
+        <h1 class="text-2xl font-bold text-gray-900 mt-1">{{ funnel.name }}</h1>
+        <p class="text-sm text-gray-500">{{ funnel.description or '' }}</p>
+    </div>
+    <div class="flex gap-2">
+        <form method="post" action="/loc/{{ location.slug }}/funnels/{{ funnel.id }}/edit">
+            <input type="hidden" name="name" value="{{ funnel.name }}">
+            <input type="hidden" name="description" value="{{ funnel.description or '' }}">
+            <label class="flex items-center gap-2 text-sm">
+                <input type="checkbox" name="is_published" {% if funnel.is_published %}checked{% endif %} onchange="this.form.submit()" class="rounded border-gray-300 text-indigo-600">
+                Published
+            </label>
+        </form>
+        <form method="post" action="/loc/{{ location.slug }}/funnels/{{ funnel.id }}/delete" onsubmit="return confirm('Delete this funnel?')">
+            <button type="submit" class="bg-red-100 text-red-700 px-3 py-2 rounded-lg text-sm hover:bg-red-200">Delete</button>
+        </form>
+    </div>
+</div>
+
+<div class="bg-white rounded-lg shadow p-4 mb-6">
+    <h2 class="font-medium text-gray-900 mb-3">Pages</h2>
+    {% for page in funnel.pages %}
+    <div class="bg-gray-50 rounded p-3 mb-3">
+        <div class="flex items-center justify-between mb-2">
+            <div>
+                <span class="font-medium text-sm">{{ page.name }}</span>
+                <span class="text-xs text-gray-400 ml-2">/{{ page.url_slug }}</span>
+                {% if page.is_published %}
+                <a href="/p/{{ funnel.id }}/{{ page.url_slug }}" class="text-xs text-indigo-600 ml-2 hover:underline" target="_blank">View</a>
+                {% endif %}
+            </div>
+            <div class="flex gap-2">
+                <span class="text-xs px-2 py-0.5 rounded-full {% if page.is_published %}bg-green-100 text-green-700{% else %}bg-gray-100 text-gray-500{% endif %}">
+                    {% if page.is_published %}Live{% else %}Draft{% endif %}
+                </span>
+                <form method="post" action="/loc/{{ location.slug }}/funnels/{{ funnel.id }}/pages/{{ page.id }}/delete">
+                    <button type="submit" class="text-red-600 hover:underline text-xs">Delete</button>
+                </form>
+            </div>
+        </div>
+        <form method="post" action="/loc/{{ location.slug }}/funnels/{{ funnel.id }}/pages/{{ page.id }}/edit" class="space-y-2">
+            <div class="grid grid-cols-3 gap-2">
+                <input type="text" name="name" value="{{ page.name }}" class="border border-gray-300 rounded px-2 py-1 text-sm">
+                <input type="text" name="url_slug" value="{{ page.url_slug }}" class="border border-gray-300 rounded px-2 py-1 text-sm">
+                <div class="flex items-center gap-2">
+                    <input type="checkbox" name="is_published" {% if page.is_published %}checked{% endif %} class="rounded border-gray-300 text-indigo-600">
+                    <label class="text-xs text-gray-500">Published</label>
+                </div>
+            </div>
+            <textarea name="content_html" rows="4" class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono">{{ page.content_html or '' }}</textarea>
+            <button type="submit" class="bg-indigo-600 text-white px-3 py-1 rounded text-sm hover:bg-indigo-700">Save Page</button>
+        </form>
+    </div>
+    {% else %}
+    <p class="text-sm text-gray-400">No pages yet.</p>
+    {% endfor %}
+</div>
+
+<div class="bg-white rounded-lg shadow p-4">
+    <h3 class="font-medium text-gray-900 mb-3">Add Page</h3>
+    <form method="post" action="/loc/{{ location.slug }}/funnels/{{ funnel.id }}/pages" class="space-y-3">
+        <div class="grid grid-cols-2 gap-3">
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">Page Name</label>
+                <input type="text" name="name" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">URL Slug</label>
+                <input type="text" name="url_slug" required placeholder="my-page" class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+            </div>
+        </div>
+        <div>
+            <label class="block text-xs text-gray-500 mb-1">Content (HTML)</label>
+            <textarea name="content_html" rows="5" class="w-full border border-gray-300 rounded px-3 py-2 text-sm font-mono"></textarea>
+        </div>
+        <div class="flex items-center gap-2">
+            <input type="checkbox" name="is_published" class="rounded border-gray-300 text-indigo-600">
+            <label class="text-sm text-gray-700">Published</label>
+        </div>
+        <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700">Add Page</button>
+    </form>
+</div>
+{% endblock %}

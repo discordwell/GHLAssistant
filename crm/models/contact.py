@@ -41,6 +41,9 @@ class Contact(UUIDMixin, TimestampMixin, TenantMixin, GHLSyncMixin, Base):
     opportunities: Mapped[list["Opportunity"]] = relationship(  # noqa: F821
         back_populates="contact", cascade="all, delete-orphan"
     )
+    conversations: Mapped[list["Conversation"]] = relationship(  # noqa: F821
+        back_populates="contact", cascade="all, delete-orphan"
+    )
 
     @property
     def full_name(self) -> str:

@@ -15,6 +15,14 @@ from .importer import (
     import_opportunities,
 )
 from .exporter import export_tags, export_contacts, export_opportunities
+from .import_conversations import import_conversations
+from .import_calendars import import_calendars
+from .import_forms import import_forms
+from .import_surveys import import_surveys
+from .import_campaigns import import_campaigns
+from .import_funnels import import_funnels
+from .export_conversations import export_conversations
+from .export_calendars import export_calendars
 
 
 async def _get_ghl_client():
@@ -56,6 +64,48 @@ async def preview_import(ghl_location_id: str) -> ImportPreview:
                     preview.opportunities += len(opps_resp.get("opportunities", []))
                 except Exception:
                     pass
+
+        # Count conversations
+        try:
+            conv_resp = await ghl.conversations.list(location_id=ghl_location_id, limit=1)
+            preview.conversations = conv_resp.get("total", len(conv_resp.get("conversations", [])))
+        except Exception:
+            pass
+
+        # Count calendars
+        try:
+            cal_resp = await ghl.calendars.list(location_id=ghl_location_id)
+            preview.calendars = len(cal_resp.get("calendars", []))
+        except Exception:
+            pass
+
+        # Count forms
+        try:
+            forms_resp = await ghl.forms.list(location_id=ghl_location_id)
+            preview.forms = len(forms_resp.get("forms", []))
+        except Exception:
+            pass
+
+        # Count surveys
+        try:
+            surveys_resp = await ghl.surveys.list(location_id=ghl_location_id)
+            preview.surveys = len(surveys_resp.get("surveys", []))
+        except Exception:
+            pass
+
+        # Count campaigns
+        try:
+            camp_resp = await ghl.campaigns.list(location_id=ghl_location_id)
+            preview.campaigns = len(camp_resp.get("campaigns", []))
+        except Exception:
+            pass
+
+        # Count funnels
+        try:
+            funnel_resp = await ghl.funnels.list(location_id=ghl_location_id)
+            preview.funnels = len(funnel_resp.get("funnels", []))
+        except Exception:
+            pass
 
     return preview
 
@@ -168,6 +218,111 @@ async def run_import(db: AsyncSession, location: Location) -> SyncResult:
             except Exception as e:
                 total.errors.append(f"Opportunities import error: {e}")
 
+        # 8. Conversations
+        try:
+            conv_resp = await ghl.conversations.list(location_id=lid, limit=100)
+            conversations_data = conv_resp.get("conversations", [])
+            messages_by_conv: dict[str, list[dict]] = {}
+            for conv in conversations_data:
+                conv_id = conv.get("id", conv.get("_id", ""))
+                if conv_id:
+                    try:
+                        msg_resp = await ghl.conversations.messages(conv_id, limit=50)
+                        raw = msg_resp.get("messages", [])
+                        if isinstance(raw, dict):
+                            messages_by_conv[conv_id] = raw.get("messages", [])
+                        elif isinstance(raw, list):
+                            messages_by_conv[conv_id] = raw
+                    except Exception:
+                        pass
+            r = await import_conversations(db, location, conversations_data, messages_by_conv)
+            total.created += r.created
+            total.updated += r.updated
+        except Exception as e:
+            total.errors.append(f"Conversations import error: {e}")
+
+        # 9. Calendars
+        try:
+            cal_resp = await ghl.calendars.list(location_id=lid)
+            calendars_data = cal_resp.get("calendars", [])
+            # Note: GHL calendar appointments endpoint may vary
+            r = await import_calendars(db, location, calendars_data)
+            total.created += r.created
+            total.updated += r.updated
+        except Exception as e:
+            total.errors.append(f"Calendars import error: {e}")
+
+        # 10. Forms
+        try:
+            forms_resp = await ghl.forms.list(location_id=lid)
+            forms_data = forms_resp.get("forms", [])
+            submissions_by_form: dict[str, list[dict]] = {}
+            for form in forms_data:
+                form_id = form.get("id", form.get("_id", ""))
+                if form_id:
+                    try:
+                        sub_resp = await ghl.forms.submissions(
+                            form_id, location_id=lid, limit=100
+                        )
+                        submissions_by_form[form_id] = sub_resp.get("submissions", [])
+                    except Exception:
+                        pass
+            r = await import_forms(db, location, forms_data, submissions_by_form)
+            total.created += r.created
+            total.updated += r.updated
+        except Exception as e:
+            total.errors.append(f"Forms import error: {e}")
+
+        # 11. Surveys
+        try:
+            surveys_resp = await ghl.surveys.list(location_id=lid)
+            surveys_data = surveys_resp.get("surveys", [])
+            submissions_by_survey: dict[str, list[dict]] = {}
+            for survey in surveys_data:
+                survey_id = survey.get("id", survey.get("_id", ""))
+                if survey_id:
+                    try:
+                        sub_resp = await ghl.surveys.submissions(
+                            survey_id, location_id=lid, limit=100
+                        )
+                        submissions_by_survey[survey_id] = sub_resp.get("submissions", [])
+                    except Exception:
+                        pass
+            r = await import_surveys(db, location, surveys_data, submissions_by_survey)
+            total.created += r.created
+            total.updated += r.updated
+        except Exception as e:
+            total.errors.append(f"Surveys import error: {e}")
+
+        # 12. Campaigns
+        try:
+            camp_resp = await ghl.campaigns.list(location_id=lid)
+            campaigns_data = camp_resp.get("campaigns", [])
+            r = await import_campaigns(db, location, campaigns_data)
+            total.created += r.created
+            total.updated += r.updated
+        except Exception as e:
+            total.errors.append(f"Campaigns import error: {e}")
+
+        # 13. Funnels
+        try:
+            funnel_resp = await ghl.funnels.list(location_id=lid)
+            funnels_data = funnel_resp.get("funnels", [])
+            pages_by_funnel: dict[str, list[dict]] = {}
+            for funnel in funnels_data:
+                funnel_id = funnel.get("id", funnel.get("_id", ""))
+                if funnel_id:
+                    try:
+                        pages_resp = await ghl.funnels.pages(funnel_id, location_id=lid)
+                        pages_by_funnel[funnel_id] = pages_resp.get("pages", [])
+                    except Exception:
+                        pass
+            r = await import_funnels(db, location, funnels_data, pages_by_funnel)
+            total.created += r.created
+            total.updated += r.updated
+        except Exception as e:
+            total.errors.append(f"Funnels import error: {e}")
+
     return total
 
 
@@ -192,6 +347,18 @@ async def run_export(db: AsyncSession, location: Location) -> SyncResult:
         r = await export_opportunities(db, location, ghl)
         total.created += r.created
         total.updated += r.updated
+        total.errors.extend(r.errors)
+
+        # 4. Conversations (outbound messages)
+        r = await export_conversations(db, location, ghl)
+        total.created += r.created
+        total.skipped += r.skipped
+        total.errors.extend(r.errors)
+
+        # 5. Calendar appointments
+        r = await export_calendars(db, location, ghl)
+        total.created += r.created
+        total.skipped += r.skipped
         total.errors.extend(r.errors)
 
     return total

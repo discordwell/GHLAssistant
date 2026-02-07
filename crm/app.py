@@ -33,7 +33,7 @@ templates = Jinja2Templates(directory=str(settings.templates_dir))
 # Import and register routers
 from .routers import (  # noqa: E402
     locations, dashboard, contacts, pipelines, tags, custom_fields, tasks, sync,
-    conversations, calendars, ghl_forms, ghl_surveys, ghl_campaigns, ghl_funnels,
+    conversations, calendars, forms, surveys, campaigns, funnels, webhooks,
 )
 
 app.include_router(locations.router)
@@ -46,7 +46,8 @@ app.include_router(tasks.router)
 app.include_router(sync.router)
 app.include_router(conversations.router)
 app.include_router(calendars.router)
-app.include_router(ghl_forms.router)
-app.include_router(ghl_surveys.router)
-app.include_router(ghl_campaigns.router)
-app.include_router(ghl_funnels.router)
+app.include_router(forms.router)
+app.include_router(surveys.router)
+app.include_router(campaigns.router)
+app.include_router(funnels.router)
+app.include_router(webhooks.router)

@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Surveys - {{ location.name }}{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold text-gray-900">Surveys</h1>
+    <a href="/loc/{{ location.slug }}/surveys/new" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700">+ New Survey</a>
+</div>
+<div class="bg-white rounded-lg shadow overflow-hidden">
+    <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+            <tr>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Questions</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Public Link</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+            {% for s in surveys %}
+            <tr class="hover:bg-gray-50 cursor-pointer" onclick="window.location='/loc/{{ location.slug }}/surveys/{{ s.id }}'">
+                <td class="px-4 py-3 text-sm font-medium text-gray-900">{{ s.name }}</td>
+                <td class="px-4 py-3 text-sm text-gray-600">{{ s.questions|length }}</td>
+                <td class="px-4 py-3 text-sm">
+                    <span class="px-2 py-0.5 rounded-full text-xs {% if s.is_active %}bg-green-100 text-green-700{% else %}bg-gray-100 text-gray-500{% endif %}">{% if s.is_active %}Active{% else %}Inactive{% endif %}</span>
+                </td>
+                <td class="px-4 py-3 text-sm text-indigo-600">/s/{{ s.id }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="px-4 py-8 text-center text-gray-400">No surveys yet</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

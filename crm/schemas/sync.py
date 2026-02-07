@@ -14,6 +14,12 @@ class ImportPreview(BaseModel):
     opportunities: int = 0
     notes: int = 0
     tasks: int = 0
+    conversations: int = 0
+    calendars: int = 0
+    forms: int = 0
+    surveys: int = 0
+    campaigns: int = 0
+    funnels: int = 0
 
 
 class SyncResult(BaseModel):

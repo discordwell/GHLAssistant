@@ -1,11 +1,12 @@
-"""GHL Conversations routes - two-panel inbox with SMS/email reply."""
+"""Conversation routes - inbox, messages, send SMS/email."""
 
 from __future__ import annotations
 
 import html
+import uuid
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,17 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import settings
 from ..database import get_db
 from ..models.location import Location
-from ..services.ghl_svc import (
-    GHLNotLinkedError,
-    fetch_conversations,
-    fetch_conversation_messages,
-    send_sms,
-    send_email,
-    mark_conversation_read,
-)
+from ..models.contact import Contact
+from ..services import conversation_svc
+from ..services.messaging_svc import MessagingNotConfigured, send_sms, send_email
 from ..tenant.deps import get_current_location
 
-router = APIRouter(tags=["ghl-conversations"])
+router = APIRouter(tags=["conversations"])
 templates = Jinja2Templates(directory=str(settings.templates_dir))
 
 
@@ -37,25 +33,15 @@ async def inbox(
     location: Location = Depends(get_current_location),
     db: AsyncSession = Depends(get_db),
 ):
-    ghl_error = None
-    conversations = []
-    if not location.ghl_location_id:
-        ghl_error = "No GHL location linked. Go to Sync to connect."
-    else:
-        try:
-            data = await fetch_conversations(location.ghl_location_id)
-            conversations = data.get("conversations", [])
-        except GHLNotLinkedError as e:
-            ghl_error = str(e)
-        except Exception as e:
-            ghl_error = f"Failed to load conversations: {e}"
-
+    conversations, total = await conversation_svc.list_conversations(db, location.id)
     return templates.TemplateResponse("conversations/inbox.html", {
         "request": request,
         "location": location,
         "locations": await _all_locations(db),
         "conversations": conversations,
-        "ghl_error": ghl_error,
+        "total": total,
+        "sms_configured": settings.twilio_configured,
+        "email_configured": settings.sendgrid_configured,
     })
 
 
@@ -65,112 +51,112 @@ async def thread_list(
     location: Location = Depends(get_current_location),
     db: AsyncSession = Depends(get_db),
 ):
-    ghl_error = None
-    conversations = []
-    if location.ghl_location_id:
-        try:
-            data = await fetch_conversations(location.ghl_location_id)
-            conversations = data.get("conversations", [])
-        except Exception as e:
-            ghl_error = str(e)
-
+    conversations, _ = await conversation_svc.list_conversations(db, location.id)
     return templates.TemplateResponse("conversations/_thread_list.html", {
         "request": request,
         "location": location,
         "conversations": conversations,
-        "ghl_error": ghl_error,
     })
 
 
 @router.get("/loc/{slug}/conversations/{conversation_id}/messages")
 async def messages(
     request: Request,
-    conversation_id: str,
+    conversation_id: uuid.UUID,
     location: Location = Depends(get_current_location),
     db: AsyncSession = Depends(get_db),
 ):
-    ghl_error = None
-    message_list = []
-    contact_id = None
-
-    try:
-        data = await fetch_conversation_messages(conversation_id)
-        raw = data.get("messages", [])
-        if isinstance(raw, dict):
-            message_list = raw.get("messages", [])
-        elif isinstance(raw, list):
-            message_list = raw
-        else:
-            message_list = []
-        # Try to mark as read
-        try:
-            await mark_conversation_read(conversation_id)
-        except Exception:
-            pass
-        # Extract contact_id from first message if available
-        if message_list:
-            contact_id = message_list[0].get("contactId", None)
-    except Exception as e:
-        ghl_error = str(e)
-
+    conv = await conversation_svc.get_conversation(db, conversation_id)
+    if not conv:
+        return HTMLResponse('<div class="text-gray-400 p-4">Conversation not found.</div>')
+    message_list = await conversation_svc.get_messages(db, conversation_id)
+    await conversation_svc.mark_read(db, conversation_id)
     return templates.TemplateResponse("conversations/_messages.html", {
         "request": request,
         "location": location,
+        "conversation": conv,
         "messages": message_list,
-        "conversation_id": conversation_id,
-        "contact_id": contact_id,
-        "ghl_error": ghl_error,
+        "contact": conv.contact,
+        "sms_configured": settings.twilio_configured,
+        "email_configured": settings.sendgrid_configured,
     })
 
 
 @router.post("/loc/{slug}/conversations/{contact_id}/sms")
 async def reply_sms(
     request: Request,
-    contact_id: str,
+    contact_id: uuid.UUID,
     location: Location = Depends(get_current_location),
+    db: AsyncSession = Depends(get_db),
 ):
     form = await request.form()
     message = form.get("message", "").strip()
     if not message:
         return HTMLResponse(
-            '<div class="text-red-600 text-sm">Message is required.</div>',
-            status_code=422,
+            '<div class="text-red-600 text-sm">Message is required.</div>', status_code=422
+        )
+
+    # Get contact phone
+    stmt = select(Contact).where(Contact.id == contact_id)
+    contact = (await db.execute(stmt)).scalar_one_or_none()
+    if not contact or not contact.phone:
+        return HTMLResponse(
+            '<div class="text-red-600 text-sm">Contact has no phone number.</div>', status_code=422
         )
 
     try:
-        await send_sms(contact_id, message, location.ghl_location_id)
+        await send_sms(db, location.id, contact_id, contact.phone, message)
+        return HTMLResponse('<div class="text-green-600 text-sm font-medium">SMS sent.</div>')
+    except MessagingNotConfigured as e:
         return HTMLResponse(
-            '<div class="text-green-600 text-sm font-medium">SMS sent.</div>'
+            f'<div class="text-yellow-600 text-sm">{html.escape(str(e))}</div>', status_code=422
         )
     except Exception as e:
         return HTMLResponse(
-            f'<div class="text-red-600 text-sm">Failed to send: {html.escape(str(e))}</div>',
-            status_code=500,
+            f'<div class="text-red-600 text-sm">Failed: {html.escape(str(e))}</div>', status_code=500
         )
 
 
 @router.post("/loc/{slug}/conversations/{contact_id}/email")
 async def reply_email(
     request: Request,
-    contact_id: str,
+    contact_id: uuid.UUID,
     location: Location = Depends(get_current_location),
+    db: AsyncSession = Depends(get_db),
 ):
     form = await request.form()
     subject = form.get("subject", "").strip()
     body = form.get("body", "").strip()
     if not subject or not body:
         return HTMLResponse(
-            '<div class="text-red-600 text-sm">Subject and body are required.</div>',
-            status_code=422,
+            '<div class="text-red-600 text-sm">Subject and body are required.</div>', status_code=422
+        )
+
+    stmt = select(Contact).where(Contact.id == contact_id)
+    contact = (await db.execute(stmt)).scalar_one_or_none()
+    if not contact or not contact.email:
+        return HTMLResponse(
+            '<div class="text-red-600 text-sm">Contact has no email.</div>', status_code=422
         )
 
     try:
-        await send_email(contact_id, subject, body, location.ghl_location_id)
+        await send_email(db, location.id, contact_id, contact.email, subject, body)
+        return HTMLResponse('<div class="text-green-600 text-sm font-medium">Email sent.</div>')
+    except MessagingNotConfigured as e:
         return HTMLResponse(
-            '<div class="text-green-600 text-sm font-medium">Email sent.</div>'
+            f'<div class="text-yellow-600 text-sm">{html.escape(str(e))}</div>', status_code=422
         )
     except Exception as e:
         return HTMLResponse(
-            f'<div class="text-red-600 text-sm">Failed to send: {html.escape(str(e))}</div>',
-            status_code=500,
+            f'<div class="text-red-600 text-sm">Failed: {html.escape(str(e))}</div>', status_code=500
         )
+
+
+@router.post("/loc/{slug}/conversations/{conversation_id}/read")
+async def mark_read(
+    conversation_id: uuid.UUID,
+    slug: str,
+    db: AsyncSession = Depends(get_db),
+):
+    await conversation_svc.mark_read(db, conversation_id)
+    return HTMLResponse('<div class="text-green-600 text-sm">Marked as read.</div>')

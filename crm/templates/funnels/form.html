@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}{% if funnel %}Edit{% else %}New{% endif %} Funnel - {{ location.name }}{% endblock %}
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <a href="/loc/{{ location.slug }}/funnels/" class="text-sm text-indigo-600 hover:underline">&larr; Back</a>
+    <h1 class="text-2xl font-bold text-gray-900 mt-2 mb-6">{% if funnel %}Edit Funnel{% else %}New Funnel{% endif %}</h1>
+    <form method="post" action="{% if funnel %}/loc/{{ location.slug }}/funnels/{{ funnel.id }}/edit{% else %}/loc/{{ location.slug }}/funnels/{% endif %}" class="bg-white rounded-lg shadow p-6 space-y-4">
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+            <input type="text" name="name" value="{{ funnel.name if funnel else '' }}" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+            <textarea name="description" rows="2" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">{{ funnel.description or '' if funnel else '' }}</textarea>
+        </div>
+        <div class="flex gap-2">
+            <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700">{% if funnel %}Save{% else %}Create Funnel{% endif %}</button>
+            <a href="/loc/{{ location.slug }}/funnels/" class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm hover:bg-gray-200">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}
