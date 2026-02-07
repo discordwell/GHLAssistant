@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Calendars - {{ location.name }}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex items-center justify-between">
+        <h1 class="text-2xl font-bold text-gray-900">Calendars</h1>
+        <span class="text-sm text-gray-500">GHL Live Data</span>
+    </div>
+
+    {% if ghl_error %}
+        {% include "partials/ghl_error.html" %}
+    {% elif calendars %}
+    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {% for cal in calendars %}
+        <div class="rounded-lg border bg-white p-4 shadow-sm">
+            <h3 class="font-semibold text-gray-900">{{ cal.get("name", "Untitled") }}</h3>
+            <p class="mt-1 text-xs text-gray-500">{{ cal.get("eventType", cal.get("calendarType", "")) }}</p>
+            <p class="mt-1 text-xs text-gray-400">ID: {{ cal.get("id", cal.get("_id", "")) }}</p>
+
+            <div class="mt-4 space-y-2">
+                <div class="flex items-end gap-2">
+                    <div class="flex-1">
+                        <label class="block text-xs text-gray-600 mb-1">Start Date</label>
+                        <input type="date" id="start-{{ cal.get('id', cal.get('_id', '')) }}"
+                            class="w-full rounded border-gray-300 text-sm px-2 py-1 border">
+                    </div>
+                    <div class="flex-1">
+                        <label class="block text-xs text-gray-600 mb-1">End Date</label>
+                        <input type="date" id="end-{{ cal.get('id', cal.get('_id', '')) }}"
+                            class="w-full rounded border-gray-300 text-sm px-2 py-1 border">
+                    </div>
+                    <button
+                        class="bg-indigo-600 text-white text-sm px-3 py-1 rounded hover:bg-indigo-700"
+                        onclick="
+                            var calId = '{{ cal.get('id', cal.get('_id', '')) }}';
+                            var start = document.getElementById('start-' + calId).value;
+                            var end = document.getElementById('end-' + calId).value;
+                            if (start) {
+                                htmx.ajax('GET', '/loc/{{ location.slug }}/calendars/' + calId + '/slots?start=' + start + '&end=' + (end || start), {target: '#slots-pane', swap: 'innerHTML'});
+                            }
+                        ">
+                        Get Slots
+                    </button>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="text-center py-12 text-gray-500">
+        <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
+        </svg>
+        <p class="mt-2">No calendars found in this location.</p>
+    </div>
+    {% endif %}
+
+    <div id="slots-pane"></div>
+
+    <!-- Booking Form -->
+    <div id="booking-result"></div>
+</div>
+{% endblock %}

@@ -31,7 +31,10 @@ app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="stat
 templates = Jinja2Templates(directory=str(settings.templates_dir))
 
 # Import and register routers
-from .routers import locations, dashboard, contacts, pipelines, tags, custom_fields, tasks, sync  # noqa: E402
+from .routers import (  # noqa: E402
+    locations, dashboard, contacts, pipelines, tags, custom_fields, tasks, sync,
+    conversations, calendars, ghl_forms, ghl_surveys, ghl_campaigns, ghl_funnels,
+)
 
 app.include_router(locations.router)
 app.include_router(dashboard.router)
@@ -41,3 +44,9 @@ app.include_router(tags.router)
 app.include_router(custom_fields.router)
 app.include_router(tasks.router)
 app.include_router(sync.router)
+app.include_router(conversations.router)
+app.include_router(calendars.router)
+app.include_router(ghl_forms.router)
+app.include_router(ghl_surveys.router)
+app.include_router(ghl_campaigns.router)
+app.include_router(ghl_funnels.router)

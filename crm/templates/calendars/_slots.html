@@ -1,0 +1,64 @@
+{% if ghl_error %}
+<div class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{{ ghl_error }}</div>
+{% elif slots %}
+<div class="mt-4">
+    <h3 class="text-lg font-semibold text-gray-900 mb-3">Available Slots</h3>
+    <div class="space-y-3">
+        {% if slots is mapping %}
+            {% for date_key, time_slots in slots.items() %}
+            <div>
+                <h4 class="text-sm font-medium text-gray-700 mb-1">{{ date_key }}</h4>
+                <div class="flex flex-wrap gap-2">
+                    {% if time_slots is iterable and time_slots is not string %}
+                        {% for slot in time_slots %}
+                        <span class="inline-block rounded bg-indigo-50 border border-indigo-200 px-2 py-1 text-xs text-indigo-700">
+                            {{ slot if slot is string else slot.get("startTime", slot) }}
+                        </span>
+                        {% endfor %}
+                    {% else %}
+                        <span class="text-xs text-gray-500">{{ time_slots }}</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            {% for slot in slots %}
+            <span class="inline-block rounded bg-indigo-50 border border-indigo-200 px-2 py-1 text-xs text-indigo-700">
+                {{ slot if slot is string else slot.get("startTime", slot) }}
+            </span>
+            {% endfor %}
+        {% endif %}
+    </div>
+
+    <!-- Quick Book Form -->
+    <div class="mt-4 rounded-lg border bg-white p-4">
+        <h4 class="text-sm font-semibold text-gray-900 mb-2">Quick Book</h4>
+        <form hx-post="/loc/{{ location.slug }}/calendars/{{ calendar_id }}/book"
+              hx-target="#booking-result" hx-swap="innerHTML"
+              class="flex flex-wrap gap-2 items-end">
+            <div>
+                <label class="block text-xs text-gray-600 mb-1">Contact ID</label>
+                <input type="text" name="contact_id" required
+                    class="rounded border-gray-300 text-sm px-2 py-1 border" placeholder="contact_id">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-600 mb-1">Slot Time (ISO)</label>
+                <input type="text" name="slot_time" required
+                    class="rounded border-gray-300 text-sm px-2 py-1 border" placeholder="2025-01-15T10:00:00Z">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-600 mb-1">Title</label>
+                <input type="text" name="title"
+                    class="rounded border-gray-300 text-sm px-2 py-1 border" placeholder="Optional">
+            </div>
+            <button type="submit" class="bg-indigo-600 text-white text-sm px-3 py-1 rounded hover:bg-indigo-700">
+                Book
+            </button>
+        </form>
+    </div>
+</div>
+{% else %}
+<div class="rounded-lg border bg-gray-50 p-4 text-sm text-gray-500 text-center">
+    No available slots for the selected dates.
+</div>
+{% endif %}

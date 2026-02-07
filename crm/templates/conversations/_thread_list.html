@@ -1,0 +1,33 @@
+{% if ghl_error %}
+<div class="p-4 text-sm text-red-600">{{ ghl_error }}</div>
+{% elif conversations %}
+<div class="divide-y divide-gray-100">
+    {% for conv in conversations %}
+    <div class="p-3 hover:bg-gray-50 cursor-pointer {% if conv.get('unreadCount', 0) > 0 %}bg-indigo-50{% endif %}"
+         hx-get="/loc/{{ location.slug }}/conversations/{{ conv.get('id', conv.get('_id', '')) }}/messages"
+         hx-target="#message-pane"
+         hx-swap="innerHTML">
+        <div class="flex items-center justify-between">
+            <span class="font-medium text-sm text-gray-900 truncate">
+                {{ conv.get("contactName", conv.get("fullName", conv.get("contactId", "Unknown"))) }}
+            </span>
+            {% if conv.get("unreadCount", 0) > 0 %}
+            <span class="bg-indigo-600 text-white text-xs rounded-full px-1.5 py-0.5 min-w-[20px] text-center">
+                {{ conv.unreadCount }}
+            </span>
+            {% endif %}
+        </div>
+        <p class="text-xs text-gray-500 truncate mt-0.5">
+            {{ conv.get("lastMessageBody", conv.get("snippet", ""))[:80] }}
+        </p>
+        <p class="text-xs text-gray-400 mt-0.5">
+            {{ conv.get("lastMessageDate", conv.get("dateUpdated", ""))[:16] }}
+        </p>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="p-6 text-center text-gray-400 text-sm">
+    <p>No conversations yet.</p>
+</div>
+{% endif %}

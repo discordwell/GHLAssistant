@@ -26,6 +26,25 @@
                         <a href="/loc/{{ location.slug }}/custom-fields/" class="text-indigo-100 hover:text-white text-sm">Fields</a>
                         <a href="/loc/{{ location.slug }}/tasks/" class="text-indigo-100 hover:text-white text-sm">Tasks</a>
                         <a href="/loc/{{ location.slug }}/sync/" class="text-indigo-100 hover:text-white text-sm">Sync</a>
+                        <a href="/loc/{{ location.slug }}/conversations/" class="text-indigo-100 hover:text-white text-sm">Conversations</a>
+                        <a href="/loc/{{ location.slug }}/calendars/" class="text-indigo-100 hover:text-white text-sm">Calendars</a>
+                        <div class="relative" id="more-dropdown">
+                            <button onclick="document.getElementById('more-menu').classList.toggle('hidden')"
+                                class="text-indigo-100 hover:text-white text-sm flex items-center gap-1">
+                                More
+                                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+                                </svg>
+                            </button>
+                            <div id="more-menu" class="hidden absolute right-0 top-full mt-1 w-40 rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 z-50">
+                                <div class="py-1">
+                                    <a href="/loc/{{ location.slug }}/forms/" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Forms</a>
+                                    <a href="/loc/{{ location.slug }}/surveys/" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Surveys</a>
+                                    <a href="/loc/{{ location.slug }}/campaigns/" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Campaigns</a>
+                                    <a href="/loc/{{ location.slug }}/funnels/" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Funnels</a>
+                                </div>
+                            </div>
+                        </div>
                         {% endif %}
                     </div>
                     <div class="flex items-center">
@@ -54,6 +73,15 @@
     <div id="toast-container" class="fixed bottom-4 right-4 z-50 space-y-2"></div>
 
     <script src="/static/js/htmx-utils.js"></script>
+    <script>
+        document.addEventListener('click', function(e) {
+            var menu = document.getElementById('more-menu');
+            var dropdown = document.getElementById('more-dropdown');
+            if (menu && dropdown && !dropdown.contains(e.target)) {
+                menu.classList.add('hidden');
+            }
+        });
+    </script>
     {% block scripts %}{% endblock %}
 </body>
 </html>
