@@ -54,6 +54,17 @@ crm = [
     "jinja2>=3.1.0",
     "aiosqlite>=0.20.0",
 ]
+workflows = [
+    "fastapi[standard]>=0.110.0",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "python-multipart>=0.0.7",
+    "jinja2>=3.1.0",
+    "aiosqlite>=0.20.0",
+]
+ai = [
+    "anthropic>=0.40.0",
+]
 
 [project.scripts]
 maxlevel = "maxlevel.cli:app"

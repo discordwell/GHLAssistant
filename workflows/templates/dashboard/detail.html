@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% set active_nav = "workflows" %}
+
+{% block title %}{{ workflow.name }} — MaxLevel{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-8">
+  <div>
+    <div class="flex items-center gap-3">
+      <h1 class="text-2xl font-bold">{{ workflow.name }}</h1>
+      <span class="text-xs font-medium px-2.5 py-1 rounded-full
+        {% if workflow.status == 'published' %}bg-emerald-500/10 text-emerald-400 border border-emerald-500/20
+        {% elif workflow.status == 'paused' %}bg-amber-500/10 text-amber-400 border border-amber-500/20
+        {% else %}bg-gray-800 text-gray-400 border border-gray-700{% endif %}">
+        {{ workflow.status | title }}
+      </span>
+    </div>
+    {% if workflow.description %}
+    <p class="text-gray-400 text-sm mt-1">{{ workflow.description }}</p>
+    {% endif %}
+  </div>
+  <div class="flex gap-2">
+    <a href="/workflows/{{ workflow.id }}/edit"
+       class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors">
+      Open Editor
+    </a>
+    {% if workflow.status == 'draft' or workflow.status == 'paused' %}
+    <form method="POST" action="/workflows/{{ workflow.id }}/publish" class="inline">
+      <button type="submit"
+              class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition-colors">
+        Publish
+      </button>
+    </form>
+    {% elif workflow.status == 'published' %}
+    <form method="POST" action="/workflows/{{ workflow.id }}/pause" class="inline">
+      <button type="submit"
+              class="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium rounded-lg transition-colors">
+        Pause
+      </button>
+    </form>
+    {% endif %}
+    <form method="POST" action="/workflows/{{ workflow.id }}/delete" class="inline"
+          onsubmit="return confirm('Delete this workflow?')">
+      <button type="submit"
+              class="px-4 py-2 bg-red-600/10 hover:bg-red-600/20 text-red-400 text-sm font-medium rounded-lg border border-red-500/20 transition-colors">
+        Delete
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- Workflow Info -->
+<div class="grid grid-cols-3 gap-4 mb-8">
+  <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+    <div class="text-sm text-gray-400 mb-1">Steps</div>
+    <div class="text-2xl font-bold">{{ workflow.steps | length }}</div>
+  </div>
+  <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+    <div class="text-sm text-gray-400 mb-1">Trigger</div>
+    <div class="text-lg font-semibold">{{ (workflow.trigger_type or 'manual') | replace('_', ' ') | title }}</div>
+  </div>
+  <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+    <div class="text-sm text-gray-400 mb-1">Executions</div>
+    <div class="text-2xl font-bold">{{ workflow.executions | length }}</div>
+  </div>
+</div>
+
+<!-- Steps list -->
+{% if workflow.steps %}
+<h2 class="text-lg font-semibold mb-4">Steps</h2>
+<div class="space-y-2">
+  {% for step in workflow.steps %}
+  <div class="bg-gray-900 border border-gray-800 rounded-lg p-3 flex items-center gap-3">
+    <span class="text-xs font-mono text-gray-500 w-6">{{ step.position + 1 }}</span>
+    <span class="inline-block w-2 h-2 rounded-full
+      {% if step.step_type == 'action' %}bg-blue-400
+      {% elif step.step_type == 'condition' %}bg-amber-400
+      {% else %}bg-gray-400{% endif %}"></span>
+    <span class="font-medium">{{ step.label or step.action_type or step.step_type }}</span>
+    <span class="text-xs text-gray-500">{{ step.step_type }}</span>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% set active_nav = "workflows" %}
+
+{% block title %}Edit: {{ workflow.name }} — MaxLevel{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/jerosoler/Drawflow/dist/drawflow.min.css">
+<style>
+  .drawflow { width: 100%; height: calc(100vh - 56px - 48px); background: #0a0a0f; }
+  .drawflow .drawflow-node { background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 12px; color: #e0e0e0; min-width: 180px; }
+  .drawflow .drawflow-node.selected { border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,0.3); }
+  .drawflow .drawflow-node .title-box { background: #2a2a3e; border-radius: 11px 11px 0 0; padding: 8px 12px; font-size: 13px; font-weight: 600; }
+  .drawflow .drawflow-node .box { padding: 10px 12px; font-size: 12px; color: #a0a0b0; }
+  .drawflow .connection .main-path { stroke: #4a4a6a; stroke-width: 2; }
+  .drawflow .connection .main-path:hover { stroke: #6366f1; }
+  .drawflow .drawflow-node .input, .drawflow .drawflow-node .output { background: #6366f1; }
+
+  /* Node type colors */
+  .drawflow .drawflow-node.action .title-box { background: #1e3a5f; border-bottom: 2px solid #3b82f6; }
+  .drawflow .drawflow-node.condition .title-box { background: #3d2e0a; border-bottom: 2px solid #f59e0b; }
+  .drawflow .drawflow-node.delay .title-box { background: #1a2e1a; border-bottom: 2px solid #10b981; }
+</style>
+{% endblock %}
+
+{% block main_class %}{% endblock %}
+
+{% block content %}
+<!-- Editor toolbar -->
+<div class="bg-gray-900 border-b border-gray-800 px-4 py-2 flex items-center justify-between">
+  <div class="flex items-center gap-4">
+    <a href="/workflows/{{ workflow.id }}" class="text-gray-400 hover:text-white transition-colors">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+      </svg>
+    </a>
+    <h2 class="font-semibold text-sm">{{ workflow.name }}</h2>
+    <span class="text-xs text-gray-500" id="save-status">Saved</span>
+  </div>
+  <div class="flex items-center gap-2">
+    <!-- Add step buttons -->
+    <button onclick="addNode('action', 'send_email')"
+            class="px-3 py-1.5 text-xs bg-blue-600/20 text-blue-400 border border-blue-500/30 rounded-lg hover:bg-blue-600/30 transition-colors">
+      + Action
+    </button>
+    <button onclick="addNode('condition')"
+            class="px-3 py-1.5 text-xs bg-amber-600/20 text-amber-400 border border-amber-500/30 rounded-lg hover:bg-amber-600/30 transition-colors">
+      + Condition
+    </button>
+    <button onclick="addNode('delay')"
+            class="px-3 py-1.5 text-xs bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 rounded-lg hover:bg-emerald-600/30 transition-colors">
+      + Delay
+    </button>
+  </div>
+</div>
+
+<!-- Drawflow canvas -->
+<div id="drawflow"></div>
+
+<!-- Step config sidebar (hidden by default) -->
+<div id="step-config" class="fixed right-0 top-14 w-80 h-full bg-gray-900 border-l border-gray-800 p-4 transform translate-x-full transition-transform z-50">
+  <div class="flex items-center justify-between mb-4">
+    <h3 class="font-semibold text-sm">Step Configuration</h3>
+    <button onclick="closeConfig()" class="text-gray-400 hover:text-white">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+      </svg>
+    </button>
+  </div>
+  <div id="step-config-content"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/gh/jerosoler/Drawflow/dist/drawflow.min.js"></script>
+<script>
+  const workflowId = "{{ workflow.id }}";
+  const stepsData = {{ steps_data | tojson }};
+  const connectionsData = {{ connections | tojson }};
+</script>
+<script src="/static/js/editor.js"></script>
+{% endblock %}

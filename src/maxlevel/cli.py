@@ -3301,6 +3301,30 @@ def crm_serve(
 
 
 # ============================================================================
+# Workflow Builder Commands
+# ============================================================================
+
+builder_app = typer.Typer(help="Visual workflow automation builder")
+app.add_typer(builder_app, name="builder")
+
+
+@builder_app.command("serve")
+def builder_serve(
+    port: int = typer.Option(8022, "--port", "-p", help="Port to run on"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to"),
+):
+    """Launch the Workflow Builder web UI."""
+    try:
+        import uvicorn
+    except ImportError:
+        console.print("[red]Missing dependencies. Install with: pip install -e '.[workflows]'[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[bold cyan]Starting Workflow Builder at http://{host}:{port}[/bold cyan]")
+    uvicorn.run("workflows.app:app", host=host, port=port, reload=True)
+
+
+# ============================================================================
 # Blueprint Commands (snapshot / provision / audit / bulk)
 # ============================================================================
 

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% set active_nav = "workflows" %}
+
+{% block title %}New Workflow — MaxLevel{% endblock %}
+
+{% block content %}
+<div class="max-w-xl mx-auto">
+  <h1 class="text-2xl font-bold mb-6">New Workflow</h1>
+
+  <form method="POST" action="/workflows/new" class="space-y-5">
+    <div>
+      <label for="name" class="block text-sm font-medium text-gray-300 mb-1.5">Name</label>
+      <input type="text" id="name" name="name" required autofocus
+             class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-white
+                    focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+             placeholder="e.g. New Lead Follow-up">
+    </div>
+
+    <div>
+      <label for="description" class="block text-sm font-medium text-gray-300 mb-1.5">Description</label>
+      <textarea id="description" name="description" rows="3"
+                class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-white
+                       focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+                placeholder="What does this workflow do?"></textarea>
+    </div>
+
+    <div>
+      <label for="trigger_type" class="block text-sm font-medium text-gray-300 mb-1.5">Trigger</label>
+      <select id="trigger_type" name="trigger_type"
+              class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-white
+                     focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none">
+        <option value="manual">Manual</option>
+        <option value="contact_created">Contact Created</option>
+        <option value="tag_added">Tag Added</option>
+        <option value="tag_removed">Tag Removed</option>
+        <option value="opportunity_stage_changed">Opportunity Stage Changed</option>
+        <option value="form_submitted">Form Submitted</option>
+        <option value="webhook">Webhook</option>
+        <option value="time_based">Time-Based (Cron)</option>
+      </select>
+    </div>
+
+    <div class="flex gap-3 pt-2">
+      <button type="submit"
+              class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors">
+        Create Workflow
+      </button>
+      <a href="/"
+         class="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm font-medium rounded-lg transition-colors">
+        Cancel
+      </a>
+    </div>
+  </form>
+</div>
+{% endblock %}

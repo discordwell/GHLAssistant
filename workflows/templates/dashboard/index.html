@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% set active_nav = "workflows" %}
+
+{% block title %}Workflows — MaxLevel{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-8">
+  <div>
+    <h1 class="text-2xl font-bold">Workflows</h1>
+    <p class="text-gray-400 text-sm mt-1">Automate your GoHighLevel actions</p>
+  </div>
+  <a href="/workflows/new"
+     class="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors">
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+    </svg>
+    New Workflow
+  </a>
+</div>
+
+{% if workflows %}
+<div class="grid gap-4">
+  {% for wf in workflows %}
+  <a href="/workflows/{{ wf.id }}"
+     class="block bg-gray-900 border border-gray-800 rounded-xl p-5 hover:border-gray-700 transition-colors group">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-lg bg-gray-800 flex items-center justify-center group-hover:bg-indigo-600/20 transition-colors">
+          <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M13 10V3L4 14h7v7l9-11h-7z"/>
+          </svg>
+        </div>
+        <div>
+          <h3 class="font-semibold text-white">{{ wf.name }}</h3>
+          {% if wf.description %}
+          <p class="text-sm text-gray-400 mt-0.5">{{ wf.description }}</p>
+          {% endif %}
+        </div>
+      </div>
+      <div class="flex items-center gap-4">
+        <span class="text-xs font-medium px-2.5 py-1 rounded-full
+          {% if wf.status == 'published' %}bg-emerald-500/10 text-emerald-400 border border-emerald-500/20
+          {% elif wf.status == 'paused' %}bg-amber-500/10 text-amber-400 border border-amber-500/20
+          {% else %}bg-gray-800 text-gray-400 border border-gray-700{% endif %}">
+          {{ wf.status | title }}
+        </span>
+        <span class="text-xs text-gray-500">
+          {{ wf.steps | length }} step{{ 's' if wf.steps | length != 1 else '' }}
+        </span>
+        {% if wf.trigger_type %}
+        <span class="text-xs text-gray-500">
+          {{ wf.trigger_type | replace('_', ' ') | title }}
+        </span>
+        {% endif %}
+      </div>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="text-center py-20">
+  <div class="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gray-900 border border-gray-800 flex items-center justify-center">
+    <svg class="w-8 h-8 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M13 10V3L4 14h7v7l9-11h-7z"/>
+    </svg>
+  </div>
+  <h3 class="text-lg font-semibold text-gray-300">No workflows yet</h3>
+  <p class="text-gray-500 text-sm mt-1 mb-6">Create your first automation to get started</p>
+  <a href="/workflows/new"
+     class="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors">
+    Create Workflow
+  </a>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% set active_nav = "executions" %}
+
+{% block title %}Executions — MaxLevel{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-bold mb-6">Execution History</h1>
+
+{% if executions %}
+<div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+  <table class="w-full text-sm">
+    <thead class="bg-gray-800/50">
+      <tr>
+        <th class="text-left px-4 py-3 text-gray-400 font-medium">Workflow</th>
+        <th class="text-left px-4 py-3 text-gray-400 font-medium">Status</th>
+        <th class="text-left px-4 py-3 text-gray-400 font-medium">Steps</th>
+        <th class="text-left px-4 py-3 text-gray-400 font-medium">Started</th>
+        <th class="text-left px-4 py-3 text-gray-400 font-medium">Duration</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-800">
+      {% for ex in executions %}
+      <tr class="hover:bg-gray-800/30 cursor-pointer" onclick="location.href='/executions/{{ ex.id }}'">
+        <td class="px-4 py-3 font-medium text-white">
+          {{ ex.workflow.name if ex.workflow else 'Unknown' }}
+        </td>
+        <td class="px-4 py-3">
+          <span class="inline-flex items-center gap-1.5 text-xs font-medium
+            {% if ex.status == 'completed' %}text-emerald-400
+            {% elif ex.status == 'failed' %}text-red-400
+            {% elif ex.status == 'running' %}text-blue-400
+            {% else %}text-gray-400{% endif %}">
+            <span class="w-1.5 h-1.5 rounded-full
+              {% if ex.status == 'completed' %}bg-emerald-400
+              {% elif ex.status == 'failed' %}bg-red-400
+              {% elif ex.status == 'running' %}bg-blue-400 animate-pulse
+              {% else %}bg-gray-400{% endif %}"></span>
+            {{ ex.status | title }}
+          </span>
+        </td>
+        <td class="px-4 py-3 text-gray-400">{{ ex.steps_completed }}</td>
+        <td class="px-4 py-3 text-gray-400">{{ ex.started_at.strftime('%b %d, %H:%M') if ex.started_at else '-' }}</td>
+        <td class="px-4 py-3 text-gray-400">
+          {% if ex.completed_at and ex.started_at %}
+            {{ ((ex.completed_at - ex.started_at).total_seconds() * 1000) | int }}ms
+          {% elif ex.status == 'running' %}
+            <span class="text-blue-400">Running...</span>
+          {% else %}
+            -
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="text-center py-20 text-gray-500">
+  <p>No executions yet. Run a workflow to see results here.</p>
+</div>
+{% endif %}
+{% endblock %}

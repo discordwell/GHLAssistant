@@ -1,0 +1,249 @@
+{% extends "base.html" %}
+
+{% block title %}AI Chat — MaxLevel{% endblock %}
+
+{% block head %}
+<style>
+  #chat-messages {
+    scrollbar-width: thin;
+    scrollbar-color: #374151 transparent;
+  }
+  .msg-user { background: #1e293b; border-left: 3px solid #6366f1; }
+  .msg-assistant { background: #111827; border-left: 3px solid #10b981; }
+  .msg-tool { background: #0c0f17; border-left: 3px solid #f59e0b; font-size: 0.85rem; }
+  .typing-dot { animation: blink 1.4s infinite both; }
+  .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+  .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes blink { 0%, 80%, 100% { opacity: 0.2; } 40% { opacity: 1; } }
+  pre code { white-space: pre-wrap; word-break: break-word; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="flex flex-col h-[calc(100vh-8rem)]">
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-4">
+    <div>
+      <h1 class="text-xl font-semibold">AI Chat</h1>
+      <p class="text-sm text-gray-400">Ask MaxLevel AI to manage your CRM, contacts, and workflows</p>
+    </div>
+    <button onclick="clearChat()"
+            class="px-3 py-1.5 text-sm bg-gray-800 hover:bg-gray-700 rounded-md text-gray-300 transition-colors">
+      Clear
+    </button>
+  </div>
+
+  <!-- Messages -->
+  <div id="chat-messages" class="flex-1 overflow-y-auto space-y-3 pb-4">
+    <!-- Welcome message -->
+    <div class="msg-assistant rounded-lg p-4">
+      <div class="text-xs text-emerald-400 font-medium mb-1">MaxLevel AI</div>
+      <div class="text-gray-200">
+        Hi! I can help you manage your GoHighLevel CRM. Try things like:
+        <ul class="mt-2 space-y-1 text-gray-400 text-sm list-disc list-inside">
+          <li>Search for contacts by name or email</li>
+          <li>List your pipelines and opportunities</li>
+          <li>Send an SMS or email to a contact</li>
+          <li>Run an automation workflow</li>
+          <li>Create new contacts or opportunities</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Input -->
+  <div class="border-t border-gray-800 pt-4">
+    <form id="chat-form" onsubmit="sendMessage(event)" class="flex gap-3">
+      <input id="chat-input" type="text" placeholder="Ask MaxLevel AI..."
+             autocomplete="off"
+             class="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-gray-100
+                    placeholder-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+      <button type="submit" id="send-btn"
+              class="px-5 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:cursor-not-allowed
+                     rounded-lg font-medium transition-colors">
+        Send
+      </button>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const messagesDiv = document.getElementById('chat-messages');
+const chatInput = document.getElementById('chat-input');
+const sendBtn = document.getElementById('send-btn');
+
+// Conversation history for API
+let conversationHistory = [];
+
+function scrollToBottom() {
+  messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function formatContent(text) {
+  // Basic markdown-like formatting
+  let html = escapeHtml(text);
+  // Code blocks
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre class="bg-gray-900 rounded p-3 mt-2 mb-2 overflow-x-auto"><code>$2</code></pre>');
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code class="bg-gray-800 px-1.5 py-0.5 rounded text-sm text-emerald-300">$1</code>');
+  // Bold
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  // Line breaks
+  html = html.replace(/\n/g, '<br>');
+  return html;
+}
+
+function addMessage(role, content, extraClass) {
+  const div = document.createElement('div');
+  const cls = role === 'user' ? 'msg-user' : role === 'tool' ? 'msg-tool' : 'msg-assistant';
+  div.className = `${cls} rounded-lg p-4 ${extraClass || ''}`;
+
+  const label = role === 'user' ? 'You' : role === 'tool' ? 'Tool Result' : 'MaxLevel AI';
+  const labelColor = role === 'user' ? 'text-indigo-400' : role === 'tool' ? 'text-amber-400' : 'text-emerald-400';
+
+  div.innerHTML = `
+    <div class="text-xs ${labelColor} font-medium mb-1">${label}</div>
+    <div class="text-gray-200">${typeof content === 'string' ? formatContent(content) : content}</div>
+  `;
+  messagesDiv.appendChild(div);
+  scrollToBottom();
+  return div;
+}
+
+function addTypingIndicator() {
+  const div = document.createElement('div');
+  div.id = 'typing-indicator';
+  div.className = 'msg-assistant rounded-lg p-4';
+  div.innerHTML = `
+    <div class="text-xs text-emerald-400 font-medium mb-1">MaxLevel AI</div>
+    <div class="flex gap-1.5 items-center h-5">
+      <span class="typing-dot w-2 h-2 bg-gray-400 rounded-full"></span>
+      <span class="typing-dot w-2 h-2 bg-gray-400 rounded-full"></span>
+      <span class="typing-dot w-2 h-2 bg-gray-400 rounded-full"></span>
+    </div>
+  `;
+  messagesDiv.appendChild(div);
+  scrollToBottom();
+}
+
+function removeTypingIndicator() {
+  const el = document.getElementById('typing-indicator');
+  if (el) el.remove();
+}
+
+async function sendMessage(event) {
+  event.preventDefault();
+  const text = chatInput.value.trim();
+  if (!text) return;
+
+  // Disable input
+  chatInput.value = '';
+  chatInput.disabled = true;
+  sendBtn.disabled = true;
+
+  // Add user message
+  addMessage('user', text);
+  conversationHistory.push({ role: 'user', content: text });
+
+  // Show typing
+  addTypingIndicator();
+
+  try {
+    const response = await fetch('/chat/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: conversationHistory }),
+    });
+
+    removeTypingIndicator();
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let assistantText = '';
+    let assistantDiv = null;
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const jsonStr = line.slice(6);
+        if (!jsonStr) continue;
+
+        let chunk;
+        try {
+          chunk = JSON.parse(jsonStr);
+        } catch (e) {
+          continue;
+        }
+
+        if (chunk.type === 'text') {
+          if (!assistantDiv) {
+            assistantDiv = addMessage('assistant', '');
+          }
+          assistantText += chunk.content;
+          const contentDiv = assistantDiv.querySelector('.text-gray-200');
+          contentDiv.innerHTML = formatContent(assistantText);
+          scrollToBottom();
+        } else if (chunk.type === 'tool_use') {
+          const args = JSON.stringify(chunk.input, null, 2);
+          addMessage('tool', `<span class="text-amber-300 font-medium">${escapeHtml(chunk.name)}</span><pre class="bg-gray-900 rounded p-2 mt-1 text-xs overflow-x-auto"><code>${escapeHtml(args)}</code></pre>`);
+        } else if (chunk.type === 'tool_result') {
+          const result = JSON.stringify(chunk.result, null, 2);
+          const truncated = result.length > 500 ? result.slice(0, 500) + '\n...' : result;
+          addMessage('tool', `<span class="text-green-400 text-xs">Result from ${escapeHtml(chunk.name)}</span><pre class="bg-gray-900 rounded p-2 mt-1 text-xs overflow-x-auto"><code>${escapeHtml(truncated)}</code></pre>`);
+          // Reset for next text block
+          assistantDiv = null;
+          assistantText = '';
+          addTypingIndicator();
+        } else if (chunk.type === 'done') {
+          removeTypingIndicator();
+          if (assistantText) {
+            conversationHistory.push({ role: 'assistant', content: assistantText });
+          }
+        } else if (chunk.type === 'error') {
+          addMessage('assistant', chunk.content);
+        }
+      }
+    }
+  } catch (err) {
+    removeTypingIndicator();
+    addMessage('assistant', `Error: ${err.message}`);
+  }
+
+  // Re-enable input
+  chatInput.disabled = false;
+  sendBtn.disabled = false;
+  chatInput.focus();
+}
+
+function clearChat() {
+  conversationHistory = [];
+  messagesDiv.innerHTML = `
+    <div class="msg-assistant rounded-lg p-4">
+      <div class="text-xs text-emerald-400 font-medium mb-1">MaxLevel AI</div>
+      <div class="text-gray-200">
+        Chat cleared. How can I help you?
+      </div>
+    </div>
+  `;
+}
+
+// Focus input on load
+chatInput.focus();
+</script>
+{% endblock %}
