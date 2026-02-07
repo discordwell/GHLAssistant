@@ -44,7 +44,7 @@ async def test_home_contains_cross_nav(client):
     """Cross-nav bar should be present."""
     response = await client.get("/")
     html = response.text
-    assert "localhost:8019" in html
+    assert "localhost:8023" in html
     assert "localhost:8020" in html
     assert "localhost:8021" in html
     assert "localhost:8022" in html

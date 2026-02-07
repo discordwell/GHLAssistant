@@ -3548,7 +3548,7 @@ def bulk_audit_cmd(
 
 @dashboard_app.command("serve")
 def dashboard_serve(
-    port: int = typer.Option(8019, "--port", "-p", help="Port to run on"),
+    port: int = typer.Option(8023, "--port", "-p", help="Port to run on"),
     host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to"),
 ):
     """Launch the unified dashboard web UI."""
@@ -3571,7 +3571,7 @@ def serve_all(
     import sys
 
     apps = [
-        ("dashboard.app:app", 8019, "Dashboard"),
+        ("dashboard.app:app", 8023, "Dashboard"),
         ("crm.app:app", 8020, "CRM"),
         ("hiring_tool.app:app", 8021, "Hiring"),
         ("workflows.app:app", 8022, "Workflows"),
