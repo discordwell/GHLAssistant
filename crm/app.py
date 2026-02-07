@@ -14,7 +14,12 @@ from .tenant.middleware import TenantMiddleware
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Tables managed by Alembic migrations — nothing to do on startup
+    # Auto-create tables for SQLite (local dev); PostgreSQL uses Alembic migrations
+    if "sqlite" in settings.database_url:
+        from .database import engine
+        from .models import Base
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
     yield
 
 
