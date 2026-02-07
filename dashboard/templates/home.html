@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- App Cards -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+  <!-- CRM -->
+  <a href="http://localhost:8020" class="app-card block bg-gray-900 border border-gray-800 rounded-xl p-6 hover:border-indigo-500/50">
+    <div class="flex items-center gap-3 mb-3">
+      <div class="w-10 h-10 rounded-lg bg-indigo-500/20 flex items-center justify-center">
+        <svg class="w-5 h-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+      </div>
+      <div>
+        <h3 class="text-white font-semibold">CRM Platform</h3>
+        <p class="text-xs text-gray-500">localhost:8020</p>
+      </div>
+    </div>
+    <p class="text-2xl font-bold text-white">{{ metrics.get('crm_contacts', 0) }}</p>
+    <p class="text-xs text-gray-500 mt-1">contacts</p>
+  </a>
+
+  <!-- Hiring -->
+  <a href="http://localhost:8021" class="app-card block bg-gray-900 border border-gray-800 rounded-xl p-6 hover:border-emerald-500/50">
+    <div class="flex items-center gap-3 mb-3">
+      <div class="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+        <svg class="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+        </svg>
+      </div>
+      <div>
+        <h3 class="text-white font-semibold">Hiring Tool</h3>
+        <p class="text-xs text-gray-500">localhost:8021</p>
+      </div>
+    </div>
+    <p class="text-2xl font-bold text-white">{{ metrics.get('hiring_candidates', 0) }}</p>
+    <p class="text-xs text-gray-500 mt-1">candidates</p>
+  </a>
+
+  <!-- Workflows -->
+  <a href="http://localhost:8022" class="app-card block bg-gray-900 border border-gray-800 rounded-xl p-6 hover:border-amber-500/50">
+    <div class="flex items-center gap-3 mb-3">
+      <div class="w-10 h-10 rounded-lg bg-amber-500/20 flex items-center justify-center">
+        <svg class="w-5 h-5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+        </svg>
+      </div>
+      <div>
+        <h3 class="text-white font-semibold">Workflows</h3>
+        <p class="text-xs text-gray-500">localhost:8022</p>
+      </div>
+    </div>
+    <p class="text-2xl font-bold text-white">{{ metrics.get('wf_workflows', 0) }}</p>
+    <p class="text-xs text-gray-500 mt-1">workflows</p>
+  </a>
+</div>
+
+<!-- Metrics Row -->
+<div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-10">
+  <div class="metric-card bg-gray-900 border border-gray-800 rounded-lg px-4 py-3">
+    <p class="text-xs text-gray-500 mb-1">Contacts</p>
+    <p class="text-xl font-bold text-white">{{ metrics.get('crm_contacts', 0) }}</p>
+  </div>
+  <div class="metric-card bg-gray-900 border border-gray-800 rounded-lg px-4 py-3">
+    <p class="text-xs text-gray-500 mb-1">Opportunities</p>
+    <p class="text-xl font-bold text-white">{{ metrics.get('crm_opportunities', 0) }}</p>
+  </div>
+  <div class="metric-card bg-gray-900 border border-gray-800 rounded-lg px-4 py-3">
+    <p class="text-xs text-gray-500 mb-1">Pipelines</p>
+    <p class="text-xl font-bold text-white">{{ metrics.get('crm_pipelines', 0) }}</p>
+  </div>
+  <div class="metric-card bg-gray-900 border border-gray-800 rounded-lg px-4 py-3">
+    <p class="text-xs text-gray-500 mb-1">Candidates</p>
+    <p class="text-xl font-bold text-white">{{ metrics.get('hiring_candidates', 0) }}</p>
+  </div>
+  <div class="metric-card bg-gray-900 border border-gray-800 rounded-lg px-4 py-3">
+    <p class="text-xs text-gray-500 mb-1">Positions</p>
+    <p class="text-xl font-bold text-white">{{ metrics.get('hiring_positions', 0) }}</p>
+  </div>
+  <div class="metric-card bg-gray-900 border border-gray-800 rounded-lg px-4 py-3">
+    <p class="text-xs text-emerald-400 mb-1">Hired</p>
+    <p class="text-xl font-bold text-emerald-400">{{ metrics.get('hiring_hired', 0) }}</p>
+  </div>
+  <div class="metric-card bg-gray-900 border border-gray-800 rounded-lg px-4 py-3">
+    <p class="text-xs text-gray-500 mb-1">Executions</p>
+    <p class="text-xl font-bold text-white">{{ metrics.get('wf_executions', 0) }}</p>
+  </div>
+  <div class="metric-card bg-gray-900 border border-gray-800 rounded-lg px-4 py-3">
+    <p class="text-xs text-red-400 mb-1">Failed</p>
+    <p class="text-xl font-bold text-red-400">{{ metrics.get('wf_failed', 0) }}</p>
+  </div>
+</div>
+
+<!-- Activity Feed -->
+<div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+  <div class="px-6 py-4 border-b border-gray-800">
+    <h2 class="text-sm font-semibold text-white">Recent Activity</h2>
+  </div>
+  <div class="divide-y divide-gray-800/50">
+    {% if activity %}
+      {% for item in activity %}
+      <div class="activity-item flex items-center gap-4 px-6 py-3">
+        <span class="badge-{{ item.source }} text-[10px] font-medium uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0">
+          {{ item.source }}
+        </span>
+        <span class="text-sm text-gray-400 min-w-0 truncate flex-1">
+          <span class="text-gray-200 font-medium">{{ item.action }}</span>
+          {% if item.description %} — {{ item.description }}{% endif %}
+        </span>
+        <span class="text-xs text-gray-600 shrink-0">
+          {{ item.timestamp.strftime('%b %d %H:%M') }}
+        </span>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="px-6 py-12 text-center text-gray-600">
+        <p class="text-sm">No activity yet. Start using the apps to see activity here.</p>
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

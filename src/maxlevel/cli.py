@@ -33,6 +33,7 @@ voice_app = typer.Typer(help="Voice AI agent management")
 agency_app = typer.Typer(help="Agency-level sub-account management")
 hiring_app = typer.Typer(help="Hiring funnel setup and applicant management")
 crm_app = typer.Typer(help="CRM platform management")
+dashboard_app = typer.Typer(help="Unified dashboard management")
 
 app.add_typer(auth_app, name="auth")
 app.add_typer(tdlc_app, name="10dlc")
@@ -50,6 +51,7 @@ app.add_typer(voice_app, name="voice")
 app.add_typer(agency_app, name="agency")
 app.add_typer(hiring_app, name="hiring")
 app.add_typer(crm_app, name="crm")
+app.add_typer(dashboard_app, name="dashboard")
 
 
 def _output_result(result: dict[str, Any], json_output: bool = False) -> None:
@@ -3537,6 +3539,65 @@ def bulk_audit_cmd(
 # ============================================================================
 # Main
 # ============================================================================
+
+
+# ============================================================================
+# Dashboard Commands
+# ============================================================================
+
+
+@dashboard_app.command("serve")
+def dashboard_serve(
+    port: int = typer.Option(8019, "--port", "-p", help="Port to run on"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to"),
+):
+    """Launch the unified dashboard web UI."""
+    try:
+        import uvicorn
+    except ImportError:
+        console.print("[red]Missing dependencies. Install with: pip install -e '.[dashboard]'[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[bold cyan]Starting Dashboard at http://{host}:{port}[/bold cyan]")
+    uvicorn.run("dashboard.app:app", host=host, port=port, reload=True)
+
+
+@app.command("serve-all")
+def serve_all(
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to"),
+):
+    """Launch all apps concurrently (Dashboard, CRM, Hiring, Workflows)."""
+    import subprocess
+    import sys
+
+    apps = [
+        ("dashboard.app:app", 8019, "Dashboard"),
+        ("crm.app:app", 8020, "CRM"),
+        ("hiring_tool.app:app", 8021, "Hiring"),
+        ("workflows.app:app", 8022, "Workflows"),
+    ]
+
+    console.print("[bold cyan]Starting all MaxLevel apps...[/bold cyan]")
+    for module, port, name in apps:
+        console.print(f"  {name:12s} → http://{host}:{port}")
+
+    processes = []
+    for module, port, name in apps:
+        p = subprocess.Popen(
+            [sys.executable, "-m", "uvicorn", module,
+             "--host", host, "--port", str(port), "--reload"],
+        )
+        processes.append(p)
+
+    try:
+        for p in processes:
+            p.wait()
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Shutting down all apps...[/yellow]")
+        for p in processes:
+            p.terminate()
+        for p in processes:
+            p.wait(timeout=5)
 
 
 @app.command()

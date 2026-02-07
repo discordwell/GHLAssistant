@@ -1,0 +1,31 @@
+/* Dashboard-specific styles */
+
+/* Smooth transitions on metric cards */
+.metric-card {
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.metric-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+/* Activity feed item hover */
+.activity-item {
+    transition: background-color 0.1s ease;
+}
+.activity-item:hover {
+    background-color: rgba(255, 255, 255, 0.03);
+}
+
+/* App card glow on hover */
+.app-card {
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.app-card:hover {
+    box-shadow: 0 0 20px rgba(99, 102, 241, 0.1);
+}
+
+/* Source badge colors */
+.badge-crm { background-color: rgba(99, 102, 241, 0.15); color: rgb(165, 180, 252); }
+.badge-hiring { background-color: rgba(16, 185, 129, 0.15); color: rgb(110, 231, 183); }
+.badge-workflows { background-color: rgba(245, 158, 11, 0.15); color: rgb(252, 211, 77); }

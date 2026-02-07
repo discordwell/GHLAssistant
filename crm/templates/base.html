@@ -11,6 +11,7 @@
     {% block head %}{% endblock %}
 </head>
 <body class="h-full" hx-boost="true">
+    {% include "partials/cross_nav.html" ignore missing %}
     <div class="min-h-full">
         <nav class="bg-indigo-700">
             <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">

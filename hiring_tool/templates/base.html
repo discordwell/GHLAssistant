@@ -11,6 +11,7 @@
     {% block head %}{% endblock %}
 </head>
 <body class="h-full" hx-boost="true">
+    {% include "partials/cross_nav.html" ignore missing %}
     <nav class="bg-white border-b border-gray-200">
         <div class="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between h-14">

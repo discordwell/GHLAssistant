@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}MaxLevel Dashboard{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <link rel="stylesheet" href="/static/css/dashboard.css">
+  {% block head %}{% endblock %}
+</head>
+<body class="h-full bg-gray-950 text-gray-100">
+  {% include "partials/cross_nav.html" %}
+
+  <nav class="bg-gray-900 border-b border-gray-800">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-14">
+        <div class="flex items-center gap-6">
+          <a href="/" class="text-lg font-bold text-white tracking-tight">
+            <span class="text-indigo-400">Max</span>Level
+          </a>
+          <span class="text-sm text-gray-500">Dashboard</span>
+        </div>
+        <div class="flex items-center gap-3 text-sm text-gray-500">
+          <span class="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
+          Connected
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <main class="{% block main_class %}max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8{% endblock %}">
+    {% block content %}{% endblock %}
+  </main>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>
