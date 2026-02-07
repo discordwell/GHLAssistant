@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Locations - CRM Platform{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto">
+    <div class="flex items-center justify-between mb-6">
+        <h1 class="text-2xl font-bold text-gray-900">Locations</h1>
+        <a href="/locations/new" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700">+ New Location</a>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {% for loc in locations %}
+        <a href="/loc/{{ loc.slug }}/" class="bg-white rounded-lg shadow p-4 hover:shadow-md transition-shadow block">
+            <h3 class="font-semibold text-gray-900">{{ loc.name }}</h3>
+            <p class="text-sm text-gray-500 mt-1">{{ loc.slug }}</p>
+            {% if loc.ghl_location_id %}
+            <p class="text-xs text-gray-400 mt-2">GHL: {{ loc.ghl_location_id[:12] }}...</p>
+            {% endif %}
+        </a>
+        {% else %}
+        <div class="col-span-2 text-center py-12 text-gray-400">
+            <p class="text-lg mb-2">No locations yet</p>
+            <a href="/locations/new" class="text-indigo-600 hover:underline text-sm">Create your first location</a>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

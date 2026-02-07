@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Tasks - {{ location.name }}{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-bold text-gray-900 mb-4">Tasks</h1>
+
+<div class="flex gap-2 mb-4">
+    <a href="/loc/{{ location.slug }}/tasks/" class="px-3 py-1 rounded-lg text-sm {% if not current_status %}bg-indigo-600 text-white{% else %}bg-gray-100 text-gray-700{% endif %}">All</a>
+    <a href="/loc/{{ location.slug }}/tasks/?status=pending" class="px-3 py-1 rounded-lg text-sm {% if current_status == 'pending' %}bg-indigo-600 text-white{% else %}bg-gray-100 text-gray-700{% endif %}">Pending</a>
+    <a href="/loc/{{ location.slug }}/tasks/?status=in_progress" class="px-3 py-1 rounded-lg text-sm {% if current_status == 'in_progress' %}bg-indigo-600 text-white{% else %}bg-gray-100 text-gray-700{% endif %}">In Progress</a>
+    <a href="/loc/{{ location.slug }}/tasks/?status=done" class="px-3 py-1 rounded-lg text-sm {% if current_status == 'done' %}bg-indigo-600 text-white{% else %}bg-gray-100 text-gray-700{% endif %}">Done</a>
+</div>
+
+<div class="bg-white rounded-lg shadow p-4 mb-4">
+    <form method="post" action="/loc/{{ location.slug }}/tasks/" class="space-y-3">
+        <div class="flex gap-2">
+            <input type="text" name="title" required placeholder="Task title..."
+                   class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            <input type="date" name="due_date" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            <select name="priority" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                <option value="0">Normal</option>
+                <option value="1">High</option>
+                <option value="2">Urgent</option>
+            </select>
+            <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700">Add</button>
+        </div>
+    </form>
+</div>
+
+<div class="bg-white rounded-lg shadow divide-y divide-gray-100">
+    {% for task in tasks %}
+    <div class="px-4 py-3 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <form method="post" action="/loc/{{ location.slug }}/tasks/{{ task.id }}/status">
+                <input type="hidden" name="status" value="{% if task.status == 'done' %}pending{% else %}done{% endif %}">
+                <button type="submit" class="w-5 h-5 rounded border {% if task.status == 'done' %}bg-green-500 border-green-500 text-white{% else %}border-gray-300{% endif %} flex items-center justify-center text-xs">
+                    {% if task.status == 'done' %}&#10003;{% endif %}
+                </button>
+            </form>
+            <div>
+                <p class="text-sm {% if task.status == 'done' %}line-through text-gray-400{% else %}text-gray-900{% endif %}">{{ task.title }}</p>
+                <p class="text-xs text-gray-400">
+                    {% if task.due_date %}Due: {{ task.due_date }}{% endif %}
+                    {% if task.contact %} &middot; {{ task.contact.full_name }}{% endif %}
+                    {% if task.priority == 1 %}<span class="text-orange-500 ml-1">High</span>{% elif task.priority == 2 %}<span class="text-red-500 ml-1">Urgent</span>{% endif %}
+                </p>
+            </div>
+        </div>
+        <form method="post" action="/loc/{{ location.slug }}/tasks/{{ task.id }}/delete" onsubmit="return confirm('Delete task?')">
+            <button type="submit" class="text-red-400 hover:text-red-600 text-xs">Delete</button>
+        </form>
+    </div>
+    {% else %}
+    <div class="px-4 py-8 text-center text-gray-400">No tasks</div>
+    {% endfor %}
+</div>
+{% endblock %}

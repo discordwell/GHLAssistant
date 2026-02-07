@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - {{ location.name }}{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <h1 class="text-2xl font-bold text-gray-900">{{ location.name }}</h1>
+    <p class="text-sm text-gray-500">Dashboard</p>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+    <div class="bg-white rounded-lg shadow p-4">
+        <p class="text-sm text-gray-500">Contacts</p>
+        <p class="text-2xl font-bold text-gray-900">{{ contact_count }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4">
+        <p class="text-sm text-gray-500">Pipelines</p>
+        <p class="text-2xl font-bold text-gray-900">{{ pipeline_count }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4">
+        <p class="text-sm text-gray-500">Opportunities</p>
+        <p class="text-2xl font-bold text-gray-900">{{ opp_count }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4">
+        <p class="text-sm text-gray-500">Tags</p>
+        <p class="text-2xl font-bold text-gray-900">{{ tag_count }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4">
+        <p class="text-sm text-gray-500">Open Value</p>
+        <p class="text-2xl font-bold text-green-600">${{ "%.2f"|format(open_value) }}</p>
+    </div>
+</div>
+
+<div class="bg-white rounded-lg shadow">
+    <div class="px-4 py-3 border-b border-gray-200">
+        <h2 class="text-lg font-semibold text-gray-900">Recent Activity</h2>
+    </div>
+    <div class="divide-y divide-gray-100">
+        {% if activities %}
+            {% for activity in activities %}
+            <div class="px-4 py-3 flex items-center justify-between">
+                <div>
+                    <span class="inline-block px-2 py-0.5 text-xs rounded
+                        {% if activity.action == 'created' %}bg-green-100 text-green-700
+                        {% elif activity.action == 'updated' %}bg-blue-100 text-blue-700
+                        {% elif activity.action == 'deleted' %}bg-red-100 text-red-700
+                        {% elif activity.action == 'import' %}bg-purple-100 text-purple-700
+                        {% else %}bg-gray-100 text-gray-700{% endif %}">
+                        {{ activity.action }}
+                    </span>
+                    <span class="text-sm text-gray-600 ml-2">{{ activity.description or activity.entity_type }}</span>
+                </div>
+                <span class="text-xs text-gray-400">{{ activity.created_at.strftime('%b %d, %H:%M') if activity.created_at else '' }}</span>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="px-4 py-8 text-center text-gray-400">No activity yet</div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

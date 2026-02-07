@@ -1,0 +1,17 @@
+<div class="kanban-card" data-id="{{ opp.id }}">
+    <a href="/loc/{{ location.slug }}/opportunities/{{ opp.id }}" class="block">
+        <p class="text-sm font-medium text-gray-900">{{ opp.name }}</p>
+        {% if opp.contact %}
+        <p class="text-xs text-gray-500 mt-1">{{ opp.contact.full_name }}</p>
+        {% endif %}
+        {% if opp.monetary_value %}
+        <p class="text-xs text-green-600 mt-1">${{ "%.2f"|format(opp.monetary_value) }}</p>
+        {% endif %}
+        <span class="inline-block mt-1 text-xs px-1.5 py-0.5 rounded
+            {% if opp.status == 'won' %}bg-green-100 text-green-700
+            {% elif opp.status == 'lost' %}bg-red-100 text-red-700
+            {% else %}bg-blue-100 text-blue-700{% endif %}">
+            {{ opp.status }}
+        </span>
+    </a>
+</div>

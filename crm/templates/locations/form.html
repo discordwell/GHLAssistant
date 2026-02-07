@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}{% if location %}Edit{% else %}New{% endif %} Location{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <a href="/locations/" class="text-sm text-indigo-600 hover:underline">&larr; Back</a>
+    <h1 class="text-2xl font-bold text-gray-900 mt-2 mb-6">{% if location %}Edit Location{% else %}New Location{% endif %}</h1>
+
+    <form method="post" action="{% if location %}/locations/{{ location.slug }}/edit{% else %}/locations/{% endif %}" class="bg-white rounded-lg shadow p-6 space-y-4">
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Location Name</label>
+            <input type="text" name="name" required value="{{ location.name if location else '' }}"
+                   class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Timezone</label>
+            <input type="text" name="timezone" value="{{ location.timezone if location else 'UTC' }}"
+                   class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">GHL Location ID</label>
+            <input type="text" name="ghl_location_id" value="{{ location.ghl_location_id or '' if location else '' }}"
+                   placeholder="Optional - for GHL sync" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">GHL Company ID</label>
+            <input type="text" name="ghl_company_id" value="{{ location.ghl_company_id or '' if location else '' }}"
+                   placeholder="Optional" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div class="flex gap-2">
+            <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700">
+                {% if location %}Save Changes{% else %}Create Location{% endif %}
+            </button>
+            <a href="/locations/" class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm hover:bg-gray-200">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

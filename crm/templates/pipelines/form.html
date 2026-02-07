@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}{% if pipeline %}Edit{% else %}New{% endif %} Pipeline - {{ location.name }}{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <a href="/loc/{{ location.slug }}/pipelines/" class="text-sm text-indigo-600 hover:underline">&larr; Back</a>
+    <h1 class="text-2xl font-bold text-gray-900 mt-2 mb-6">{% if pipeline %}Edit Pipeline{% else %}New Pipeline{% endif %}</h1>
+
+    <form method="post" action="/loc/{{ location.slug }}/pipelines/" class="bg-white rounded-lg shadow p-6 space-y-4">
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Pipeline Name</label>
+            <input type="text" name="name" required value="{{ pipeline.name if pipeline else '' }}"
+                   class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+            <textarea name="description" rows="2"
+                      class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">{{ pipeline.description or '' if pipeline else '' }}</textarea>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Stages (comma-separated)</label>
+            <input type="text" name="stages" placeholder="e.g. Lead, Qualified, Proposal, Negotiation, Won, Lost"
+                   class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            <p class="text-xs text-gray-400 mt-1">Enter stage names separated by commas. They'll be created in order.</p>
+        </div>
+        <div class="flex gap-2">
+            <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700">Create Pipeline</button>
+            <a href="/loc/{{ location.slug }}/pipelines/" class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm hover:bg-gray-200">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

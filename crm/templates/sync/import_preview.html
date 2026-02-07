@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Import Preview - {{ location.name }}{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <a href="/loc/{{ location.slug }}/sync/" class="text-sm text-indigo-600 hover:underline">&larr; Back to Sync</a>
+    <h1 class="text-2xl font-bold text-gray-900 mt-2 mb-6">Import Preview</h1>
+
+    <div class="bg-white rounded-lg shadow p-6">
+        <p class="text-sm text-gray-600 mb-4">The following data will be imported from GHL:</p>
+
+        <div class="grid grid-cols-2 gap-3 mb-6">
+            <div class="border border-gray-200 rounded p-3">
+                <p class="text-2xl font-bold text-gray-900">{{ preview.contacts }}</p>
+                <p class="text-xs text-gray-500">Contacts</p>
+            </div>
+            <div class="border border-gray-200 rounded p-3">
+                <p class="text-2xl font-bold text-gray-900">{{ preview.tags }}</p>
+                <p class="text-xs text-gray-500">Tags</p>
+            </div>
+            <div class="border border-gray-200 rounded p-3">
+                <p class="text-2xl font-bold text-gray-900">{{ preview.custom_fields }}</p>
+                <p class="text-xs text-gray-500">Custom Fields</p>
+            </div>
+            <div class="border border-gray-200 rounded p-3">
+                <p class="text-2xl font-bold text-gray-900">{{ preview.pipelines }}</p>
+                <p class="text-xs text-gray-500">Pipelines</p>
+            </div>
+            <div class="border border-gray-200 rounded p-3">
+                <p class="text-2xl font-bold text-gray-900">{{ preview.opportunities }}</p>
+                <p class="text-xs text-gray-500">Opportunities</p>
+            </div>
+            <div class="border border-gray-200 rounded p-3">
+                <p class="text-2xl font-bold text-gray-900">{{ preview.custom_values }}</p>
+                <p class="text-xs text-gray-500">Custom Values</p>
+            </div>
+        </div>
+
+        <div class="flex gap-2">
+            <form method="post" action="/loc/{{ location.slug }}/sync/import/confirm">
+                <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700">Confirm Import</button>
+            </form>
+            <a href="/loc/{{ location.slug }}/sync/" class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm hover:bg-gray-200">Cancel</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

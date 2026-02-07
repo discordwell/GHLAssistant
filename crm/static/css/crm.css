@@ -1,0 +1,64 @@
+/* CRM Platform Styles */
+
+/* Kanban Board */
+.kanban-board {
+    display: flex;
+    gap: 1rem;
+    overflow-x: auto;
+    padding-bottom: 1rem;
+    min-height: 70vh;
+}
+
+.kanban-column {
+    flex: 0 0 280px;
+    background: #f9fafb;
+    border-radius: 0.5rem;
+    padding: 0.75rem;
+    display: flex;
+    flex-direction: column;
+}
+
+.kanban-cards {
+    flex: 1;
+    min-height: 60px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.kanban-card {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 0.375rem;
+    padding: 0.75rem;
+    cursor: grab;
+    transition: box-shadow 0.15s, transform 0.15s;
+}
+
+.kanban-card:hover {
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+.kanban-card.sortable-ghost {
+    opacity: 0.4;
+    transform: rotate(2deg);
+}
+
+.kanban-card.sortable-chosen {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.kanban-card a {
+    text-decoration: none;
+    color: inherit;
+}
+
+/* Toast animations */
+@keyframes fade-in {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+    animation: fade-in 0.3s ease-out;
+}

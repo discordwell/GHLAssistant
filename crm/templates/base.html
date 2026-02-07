@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-gray-50">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}CRM Platform{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
+    <link rel="stylesheet" href="/static/css/crm.css">
+    {% block head %}{% endblock %}
+</head>
+<body class="h-full" hx-boost="true">
+    <div class="min-h-full">
+        <nav class="bg-indigo-700">
+            <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+                <div class="flex h-14 items-center justify-between">
+                    <div class="flex items-center space-x-6">
+                        <a href="/" class="text-white font-bold text-lg">CRM</a>
+                        {% if location is defined and location %}
+                        <a href="/loc/{{ location.slug }}/" class="text-indigo-100 hover:text-white text-sm">Dashboard</a>
+                        <a href="/loc/{{ location.slug }}/contacts/" class="text-indigo-100 hover:text-white text-sm">Contacts</a>
+                        <a href="/loc/{{ location.slug }}/pipelines/" class="text-indigo-100 hover:text-white text-sm">Pipelines</a>
+                        <a href="/loc/{{ location.slug }}/tags/" class="text-indigo-100 hover:text-white text-sm">Tags</a>
+                        <a href="/loc/{{ location.slug }}/custom-fields/" class="text-indigo-100 hover:text-white text-sm">Fields</a>
+                        <a href="/loc/{{ location.slug }}/tasks/" class="text-indigo-100 hover:text-white text-sm">Tasks</a>
+                        <a href="/loc/{{ location.slug }}/sync/" class="text-indigo-100 hover:text-white text-sm">Sync</a>
+                        {% endif %}
+                    </div>
+                    <div class="flex items-center">
+                        {% if locations is defined and locations %}
+                        <select onchange="if(this.value) window.location.href=this.value"
+                                class="bg-indigo-600 text-white text-sm rounded px-2 py-1 border border-indigo-500">
+                            {% for loc in locations %}
+                            <option value="/loc/{{ loc.slug }}/"
+                                {% if location is defined and location and loc.id == location.id %}selected{% endif %}>
+                                {{ loc.name }}
+                            </option>
+                            {% endfor %}
+                            <option value="/locations/">+ Manage</option>
+                        </select>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <main class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    <div id="toast-container" class="fixed bottom-4 right-4 z-50 space-y-2"></div>
+
+    <script src="/static/js/htmx-utils.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

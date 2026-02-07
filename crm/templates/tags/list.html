@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Tags - {{ location.name }}{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-bold text-gray-900 mb-6">Tags</h1>
+
+<div class="bg-white rounded-lg shadow p-4 mb-4">
+    <form method="post" action="/loc/{{ location.slug }}/tags/" class="flex gap-2">
+        <input type="text" name="name" required placeholder="New tag name..."
+               class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm">
+        <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700">Add Tag</button>
+    </form>
+</div>
+
+<div class="bg-white rounded-lg shadow">
+    <div class="divide-y divide-gray-100">
+        {% for tag in tags %}
+        <div class="px-4 py-3 flex items-center justify-between">
+            <span class="inline-flex items-center bg-indigo-100 text-indigo-700 text-sm px-3 py-1 rounded-full">{{ tag.name }}</span>
+            <div class="flex items-center gap-3">
+                {% if tag.ghl_id %}<span class="text-xs text-gray-400">GHL: {{ tag.ghl_id[:8] }}...</span>{% endif %}
+                <form method="post" action="/loc/{{ location.slug }}/tags/{{ tag.id }}/delete" onsubmit="return confirm('Delete tag?')">
+                    <button type="submit" class="text-red-400 hover:text-red-600 text-sm">Delete</button>
+                </form>
+            </div>
+        </div>
+        {% else %}
+        <div class="px-4 py-8 text-center text-gray-400">No tags yet</div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

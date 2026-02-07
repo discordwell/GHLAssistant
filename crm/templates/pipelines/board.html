@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}{{ pipeline.name }} - {{ location.name }}{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-4">
+    <div>
+        <a href="/loc/{{ location.slug }}/pipelines/" class="text-sm text-indigo-600 hover:underline">&larr; All Pipelines</a>
+        <h1 class="text-2xl font-bold text-gray-900 mt-1">{{ pipeline.name }}</h1>
+    </div>
+    <div class="flex gap-2">
+        <button onclick="document.getElementById('add-stage-form').classList.toggle('hidden')"
+                class="bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm hover:bg-gray-200">+ Stage</button>
+        <button onclick="document.getElementById('add-opp-form').classList.toggle('hidden')"
+                class="bg-indigo-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-indigo-700">+ Opportunity</button>
+    </div>
+</div>
+
+<!-- Add Stage Form (hidden) -->
+<div id="add-stage-form" class="hidden bg-white rounded-lg shadow p-4 mb-4">
+    <form method="post" action="/loc/{{ location.slug }}/pipelines/{{ pipeline.id }}/stages" class="flex gap-2 items-end">
+        <div class="flex-1">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Stage Name</label>
+            <input type="text" name="name" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+        </div>
+        <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm">Add</button>
+    </form>
+</div>
+
+<!-- Add Opportunity Form (hidden) -->
+<div id="add-opp-form" class="hidden bg-white rounded-lg shadow p-4 mb-4">
+    <form method="post" action="/loc/{{ location.slug }}/pipelines/{{ pipeline.id }}/opportunities" class="space-y-3">
+        <div class="grid grid-cols-2 gap-3">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                <input type="text" name="name" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Stage</label>
+                <select name="stage_id" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                    {% for stage in pipeline.stages %}
+                    <option value="{{ stage.id }}">{{ stage.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="grid grid-cols-3 gap-3">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Contact</label>
+                <select name="contact_id" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                    <option value="">-- None --</option>
+                    {% for c in contacts %}
+                    <option value="{{ c.id }}">{{ c.full_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Value ($)</label>
+                <input type="number" name="monetary_value" step="0.01" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Source</label>
+                <input type="text" name="source" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            </div>
+        </div>
+        <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm">Create Opportunity</button>
+    </form>
+</div>
+
+<!-- Kanban Board -->
+<div class="kanban-board">
+    {% for stage in pipeline.stages %}
+    <div class="kanban-column">
+        <div class="flex items-center justify-between mb-2">
+            <h3 class="font-semibold text-sm text-gray-700">{{ stage.name }}</h3>
+            <span class="text-xs text-gray-400">{{ columns[stage.id]|length }}</span>
+        </div>
+        <div class="kanban-cards" data-stage-id="{{ stage.id }}">
+            {% for opp in columns[stage.id] %}
+            {% include "partials/opportunity_card.html" %}
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/kanban.js"></script>
+{% endblock %}

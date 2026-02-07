@@ -1,0 +1,11 @@
+<div class="kanban-column">
+    <div class="flex items-center justify-between mb-2">
+        <h3 class="font-semibold text-sm text-gray-700">{{ stage.name }}</h3>
+        <span class="text-xs text-gray-400">{{ opps|length }}</span>
+    </div>
+    <div class="kanban-cards" data-stage-id="{{ stage.id }}">
+        {% for opp in opps %}
+        {% include "partials/opportunity_card.html" %}
+        {% endfor %}
+    </div>
+</div>

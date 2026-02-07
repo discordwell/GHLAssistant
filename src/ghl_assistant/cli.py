@@ -32,6 +32,7 @@ ai_app = typer.Typer(help="Conversation AI agent management")
 voice_app = typer.Typer(help="Voice AI agent management")
 agency_app = typer.Typer(help="Agency-level sub-account management")
 hiring_app = typer.Typer(help="Hiring funnel setup and applicant management")
+crm_app = typer.Typer(help="CRM platform management")
 
 app.add_typer(auth_app, name="auth")
 app.add_typer(tdlc_app, name="10dlc")
@@ -48,6 +49,7 @@ app.add_typer(ai_app, name="ai")
 app.add_typer(voice_app, name="voice")
 app.add_typer(agency_app, name="agency")
 app.add_typer(hiring_app, name="hiring")
+app.add_typer(crm_app, name="crm")
 
 
 def _output_result(result: dict[str, Any], json_output: bool = False) -> None:
@@ -3275,6 +3277,27 @@ def hiring_serve(
 
     console.print(f"[bold cyan]Starting Hiring Tool at http://{host}:{port}[/bold cyan]")
     uvicorn.run("hiring_tool.app:app", host=host, port=port, reload=True)
+
+
+# ============================================================================
+# CRM Commands
+# ============================================================================
+
+
+@crm_app.command("serve")
+def crm_serve(
+    port: int = typer.Option(8000, "--port", "-p", help="Port to run on"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to"),
+):
+    """Launch the CRM platform web UI."""
+    try:
+        import uvicorn
+    except ImportError:
+        console.print("[red]Missing dependencies. Install with: pip install -e '.[crm]'[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[bold cyan]Starting CRM Platform at http://{host}:{port}[/bold cyan]")
+    uvicorn.run("crm.app:app", host=host, port=port, reload=True)
 
 
 # ============================================================================

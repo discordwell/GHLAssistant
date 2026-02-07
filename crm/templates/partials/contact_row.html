@@ -1,0 +1,11 @@
+<tr class="hover:bg-gray-50 cursor-pointer" onclick="window.location='/loc/{{ location.slug }}/contacts/{{ contact.id }}'">
+    <td class="px-4 py-3 text-sm font-medium text-gray-900">{{ contact.full_name }}</td>
+    <td class="px-4 py-3 text-sm text-gray-600">{{ contact.email or '-' }}</td>
+    <td class="px-4 py-3 text-sm text-gray-600">{{ contact.phone or '-' }}</td>
+    <td class="px-4 py-3 text-sm text-gray-600">{{ contact.company_name or '-' }}</td>
+    <td class="px-4 py-3 text-sm">
+        {% for tag in contact.tags %}
+        <span class="inline-block bg-indigo-100 text-indigo-700 text-xs px-2 py-0.5 rounded-full mr-1">{{ tag.name }}</span>
+        {% endfor %}
+    </td>
+</tr>

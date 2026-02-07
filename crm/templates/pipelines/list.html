@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Pipelines - {{ location.name }}{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold text-gray-900">Pipelines</h1>
+    <a href="/loc/{{ location.slug }}/pipelines/new" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700">+ New Pipeline</a>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    {% for pipeline in pipelines %}
+    <a href="/loc/{{ location.slug }}/pipelines/{{ pipeline.id }}" class="bg-white rounded-lg shadow p-4 hover:shadow-md transition-shadow">
+        <h3 class="font-semibold text-gray-900">{{ pipeline.name }}</h3>
+        {% if pipeline.description %}<p class="text-sm text-gray-500 mt-1">{{ pipeline.description }}</p>{% endif %}
+        <div class="mt-3 flex flex-wrap gap-1">
+            {% for stage in pipeline.stages %}
+            <span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{{ stage.name }}</span>
+            {% endfor %}
+        </div>
+        <p class="text-xs text-gray-400 mt-2">{{ pipeline.stages|length }} stages</p>
+    </a>
+    {% else %}
+    <div class="col-span-3 text-center py-12 text-gray-400">
+        <p class="text-lg mb-2">No pipelines yet</p>
+        <a href="/loc/{{ location.slug }}/pipelines/new" class="text-indigo-600 hover:underline text-sm">Create your first pipeline</a>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

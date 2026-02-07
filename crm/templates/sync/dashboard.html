@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}GHL Sync - {{ location.name }}{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-bold text-gray-900 mb-6">GHL Sync</h1>
+
+{% if error is defined and error %}
+<div class="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+    <p class="text-red-700 text-sm">{{ error }}</p>
+</div>
+{% endif %}
+
+{% if has_ghl %}
+<div class="bg-white rounded-lg shadow p-6 mb-4">
+    <div class="flex items-center justify-between mb-4">
+        <div>
+            <h2 class="font-semibold text-gray-900">Connected to GHL</h2>
+            <p class="text-sm text-gray-500">Location ID: {{ location.ghl_location_id }}</p>
+        </div>
+        <span class="bg-green-100 text-green-700 text-xs px-2 py-1 rounded-full">Connected</span>
+    </div>
+
+    <div class="grid grid-cols-2 gap-4">
+        <div class="border border-gray-200 rounded-lg p-4">
+            <h3 class="font-semibold text-sm text-gray-700 mb-2">Import from GHL</h3>
+            <p class="text-xs text-gray-500 mb-3">Pull contacts, tags, pipelines, and more from your GHL location into this CRM.</p>
+            <form method="post" action="/loc/{{ location.slug }}/sync/import/preview">
+                <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700">Preview Import</button>
+            </form>
+        </div>
+
+        <div class="border border-gray-200 rounded-lg p-4">
+            <h3 class="font-semibold text-sm text-gray-700 mb-2">Export to GHL</h3>
+            <p class="text-xs text-gray-500 mb-3">Push local contacts, tags, and pipelines back to your GHL location.</p>
+            <form method="post" action="/loc/{{ location.slug }}/sync/export" onsubmit="return confirm('Export all data to GHL?')">
+                <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700">Export to GHL</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="bg-white rounded-lg shadow p-6 text-center">
+    <p class="text-gray-500 mb-4">No GHL location linked. Set the GHL Location ID in location settings to enable sync.</p>
+    <a href="/locations/{{ location.slug }}/edit" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700">Edit Location Settings</a>
+</div>
+{% endif %}
+{% endblock %}

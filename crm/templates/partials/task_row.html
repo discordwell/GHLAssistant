@@ -1,0 +1,14 @@
+<div class="px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+        <form method="post" action="/loc/{{ location.slug }}/tasks/{{ task.id }}/status">
+            <input type="hidden" name="status" value="{% if task.status == 'done' %}pending{% else %}done{% endif %}">
+            <button type="submit" class="w-5 h-5 rounded border {% if task.status == 'done' %}bg-green-500 border-green-500{% else %}border-gray-300{% endif %} flex items-center justify-center text-xs text-white">
+                {% if task.status == 'done' %}&#10003;{% endif %}
+            </button>
+        </form>
+        <div>
+            <p class="text-sm {% if task.status == 'done' %}line-through text-gray-400{% else %}text-gray-900{% endif %}">{{ task.title }}</p>
+            <p class="text-xs text-gray-400">{% if task.due_date %}Due: {{ task.due_date }}{% endif %}</p>
+        </div>
+    </div>
+</div>
