@@ -1,9 +1,11 @@
 # MaxLevel Project Notes
 
 ## Default Ports
+- **Dashboard**: `8023` — `maxlevel dashboard serve`
 - **CRM Platform**: `8020` — `maxlevel crm serve`
 - **Hiring Tool**: `8021` — `maxlevel hiring serve`
 - **Workflow Builder**: `8022` — `maxlevel builder serve`
+- **All at once**: `maxlevel serve-all`
 
 ## Project Structure
 ```
@@ -16,6 +18,7 @@ src/maxlevel/           # Main CLI package (pip install -e ".[dev]")
   browser/              # Browser automation (nodriver)
   hiring/               # Hiring funnel templates
 
+dashboard/              # Unified dashboard (FastAPI + HTMX, reads all 3 DBs)
 crm/                    # CRM web app (FastAPI + HTMX + SQLAlchemy async)
 hiring_tool/            # Hiring web app (FastAPI + HTMX + SQLModel)
 workflows/              # Workflow Builder (FastAPI + HTMX + Drawflow + SQLAlchemy async)

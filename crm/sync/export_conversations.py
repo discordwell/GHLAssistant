@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,10 +11,37 @@ from ..models.location import Location
 from ..schemas.sync import SyncResult
 
 
+def _extract_message_id(resp: dict) -> str:
+    """Extract a provider message id from common API response shapes."""
+    if not isinstance(resp, dict):
+        return ""
+
+    for key in ("id", "_id", "messageId"):
+        value = resp.get(key)
+        if isinstance(value, str) and value:
+            return value
+
+    message = resp.get("message")
+    if isinstance(message, dict):
+        for key in ("id", "_id", "messageId"):
+            value = message.get(key)
+            if isinstance(value, str) and value:
+                return value
+
+    data = resp.get("data")
+    if isinstance(data, dict):
+        for key in ("id", "_id", "messageId"):
+            value = data.get(key)
+            if isinstance(value, str) and value:
+                return value
+
+    return ""
+
+
 async def export_conversations(
     db: AsyncSession, location: Location, ghl,
 ) -> SyncResult:
-    """Export outbound messages without ghl_id to GHL."""
+    """Export outbound messages without provider IDs to GHL."""
     result = SyncResult()
 
     stmt = (
@@ -42,13 +67,14 @@ async def export_conversations(
             continue
 
         try:
+            provider_resp: dict = {}
             if msg.channel == "sms" and msg.body:
-                await ghl.conversations.send_sms(
+                provider_resp = await ghl.conversations.send_sms(
                     contact.ghl_id, msg.body, location_id=location.ghl_location_id
                 )
                 result.created += 1
             elif msg.channel == "email" and msg.body and msg.subject:
-                await ghl.conversations.send_email(
+                provider_resp = await ghl.conversations.send_email(
                     contact.ghl_id, msg.subject, msg.body,
                     location_id=location.ghl_location_id,
                 )
@@ -57,7 +83,13 @@ async def export_conversations(
                 result.skipped += 1
                 continue
 
+            provider_id = _extract_message_id(provider_resp)
+            if not provider_id:
+                # Mark as exported even when provider id isn't returned to prevent duplicates.
+                provider_id = f"exported:{msg.id}"
+            msg.provider_id = provider_id
             msg.status = "sent"
+            msg.status_detail = "exported_to_ghl"
         except Exception as e:
             result.errors.append(f"Message export error: {e}")
 

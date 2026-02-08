@@ -43,6 +43,7 @@ class ConversationsAPI:
     async def list(
         self,
         limit: int = 20,
+        offset: int = 0,
         unread_only: bool = False,
         location_id: str | None = None,
     ) -> dict[str, Any]:
@@ -50,6 +51,7 @@ class ConversationsAPI:
 
         Args:
             limit: Max results
+            offset: Pagination offset
             unread_only: Only return unread conversations
             location_id: Override default location
 
@@ -57,7 +59,7 @@ class ConversationsAPI:
             {"conversations": [...], "total": N}
         """
         lid = location_id or self._location_id
-        params = {"locationId": lid, "limit": limit}
+        params = {"locationId": lid, "limit": limit, "offset": max(offset, 0)}
         if unread_only:
             params["status"] = "unread"
 
@@ -78,12 +80,14 @@ class ConversationsAPI:
         self,
         conversation_id: str,
         limit: int = 50,
+        offset: int = 0,
     ) -> dict[str, Any]:
         """Get messages in a conversation.
 
         Args:
             conversation_id: The conversation ID
             limit: Max messages to return
+            offset: Pagination offset
 
         Returns:
             {"messages": [...]}
@@ -91,6 +95,7 @@ class ConversationsAPI:
         return await self._client._get(
             f"/conversations/{conversation_id}/messages",
             limit=limit,
+            offset=max(offset, 0),
         )
 
     async def get_by_contact(

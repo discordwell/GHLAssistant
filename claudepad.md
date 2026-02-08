@@ -2,6 +2,20 @@
 
 ## Session Summaries
 
+### 2026-02-07T~09:00 UTC - Workflow Builder + Execution Engine + AI Chat
+- Resumed from context-limited session (rename was already done)
+- Ran execution engine tests (62 passed), confirmed all prior work solid
+- Built AI Chat: `chat_svc.py` (Claude API + 11 tools + SSE streaming), `chat.py` router, chat UI template
+- Built Webhooks + Triggers: `webhooks.py` router, `trigger_svc.py` (GHL event mapping, filter matching)
+- Code review identified 10 issues; fixed HIGH priority ones:
+  - API routes returning `(dict, 404)` tuple -> `HTTPException` (3 endpoints)
+  - Webhook errors returning 200 -> proper HTTP status codes
+  - Infinite loop in runner -> cycle detection via visited set
+  - XSS in Drawflow node HTML -> `esc()` function for HTML escaping
+  - Chat tool loop unbounded -> max 10 rounds limit
+- 91 workflow tests, 520 total across all suites, all passing
+- Committed & pushed: `6c2f4de Add workflow builder with visual editor, execution engine, AI chat, and webhooks`
+
 ### 2026-02-06T~23:00 UTC - Hiring Tool Manual Testing & Bug Fix
 - Completed full browser automation testing of hiring tool web app (port 8080)
 - Tested: positions, candidates, kanban board, interviews, analytics, sync

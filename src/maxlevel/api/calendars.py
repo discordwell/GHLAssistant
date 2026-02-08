@@ -94,6 +94,8 @@ class CalendarsAPI:
         contact_id: str | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
         location_id: str | None = None,
     ) -> dict[str, Any]:
         """Get appointments.
@@ -103,6 +105,8 @@ class CalendarsAPI:
             contact_id: Filter by contact
             start_date: Filter by start date
             end_date: Filter by end date
+            limit: Max results to return
+            offset: Pagination offset
             location_id: Override default location
 
         Returns:
@@ -118,6 +122,8 @@ class CalendarsAPI:
             params["startDate"] = start_date
         if end_date:
             params["endDate"] = end_date
+        params["limit"] = min(limit, 100)
+        params["offset"] = max(offset, 0)
 
         return await self._client._get("/calendars/appointments", **params)
 

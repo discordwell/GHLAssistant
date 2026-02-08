@@ -22,6 +22,14 @@ class CRMSettings(BaseSettings):
     sendgrid_from_email: str | None = None
     sendgrid_from_name: str | None = None
 
+    # Browser fallback export planning for API-limited resources
+    sync_browser_fallback_enabled: bool = True
+    sync_browser_tab_id: int = 0
+    sync_browser_execute_enabled: bool = False
+    sync_browser_profile: str = "ghl_session"
+    sync_browser_headless: bool = False
+    sync_browser_continue_on_error: bool = True
+
     model_config = {"env_prefix": "CRM_", "env_file": ".env", "extra": "ignore"}
 
     @property
