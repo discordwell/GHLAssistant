@@ -415,7 +415,8 @@ class ChromeMCPAgent:
             List of MCP commands for login flow
         """
         return [
-            self.navigate("https://app.gohighlevel.com/login"),
+            # GHL's app server 404s direct routes like /login; root renders login UI.
+            self.navigate("https://app.gohighlevel.com/"),
             self.wait(2),
             self.find_elements("email input"),
             # After finding: form_input(ref, email)

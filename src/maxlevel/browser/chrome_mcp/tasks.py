@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import quote
 
 from .agent import ChromeMCPAgent
 
@@ -72,6 +73,20 @@ class GHLBrowserTasks:
         self.tab_id = tab_id
         self.agent = ChromeMCPAgent(tab_id)
 
+    def _deeplink(self, path: str) -> str:
+        """Convert an app route to a deep-link URL.
+
+        GHL's app server returns 404 for many direct routes like /contacts or /settings.
+        The SPA supports deep linking via `/?url=<encoded_path>`.
+        """
+        if not isinstance(path, str) or not path:
+            return self.GHL_BASE_URL
+        if not path.startswith("/"):
+            path = "/" + path
+        # Keep slashes unescaped so URLs stay readable and simple substring checks
+        # (used by tests and some tooling) still work.
+        return f"{self.GHL_BASE_URL}/?url={quote(path, safe='/')}"
+
     # =========================================================================
     # Authentication Tasks
     # =========================================================================
@@ -90,7 +105,7 @@ class GHLBrowserTasks:
             TaskStep(
                 name="navigate_login",
                 description="Navigate to GHL login page",
-                command=self.agent.navigate(f"{self.GHL_BASE_URL}/login"),
+                command=self.agent.navigate(self.GHL_BASE_URL),
                 wait_after=2.0,
             ),
             TaskStep(
@@ -253,7 +268,7 @@ class GHLBrowserTasks:
             TaskStep(
                 name="navigate_contacts",
                 description="Navigate to contacts page",
-                command=self.agent.navigate(f"{self.GHL_BASE_URL}/contacts"),
+                command=self.agent.navigate(self._deeplink("/contacts/")),
                 wait_after=2.0,
             ),
             TaskStep(
@@ -269,7 +284,7 @@ class GHLBrowserTasks:
             TaskStep(
                 name="navigate_conversations",
                 description="Navigate to conversations page",
-                command=self.agent.navigate(f"{self.GHL_BASE_URL}/conversations"),
+                command=self.agent.navigate(self._deeplink("/conversations/")),
                 wait_after=2.0,
             ),
             TaskStep(
@@ -285,7 +300,7 @@ class GHLBrowserTasks:
             TaskStep(
                 name="navigate_settings",
                 description="Navigate to settings page",
-                command=self.agent.navigate(f"{self.GHL_BASE_URL}/settings"),
+                command=self.agent.navigate(self._deeplink("/settings/")),
                 wait_after=2.0,
             ),
             TaskStep(
@@ -323,7 +338,7 @@ class GHLBrowserTasks:
             TaskStep(
                 name="navigate_contacts",
                 description="Navigate to contacts page",
-                command=self.agent.navigate(f"{self.GHL_BASE_URL}/contacts"),
+                command=self.agent.navigate(self._deeplink("/contacts/")),
                 wait_after=2.0,
             ),
             TaskStep(
@@ -438,7 +453,7 @@ class GHLBrowserTasks:
             TaskStep(
                 name="navigate_contacts",
                 description="Navigate to contacts page",
-                command=self.agent.navigate(f"{self.GHL_BASE_URL}/contacts"),
+                command=self.agent.navigate(self._deeplink("/contacts/")),
                 wait_after=2.0,
             ),
             TaskStep(
@@ -489,7 +504,7 @@ class GHLBrowserTasks:
             TaskStep(
                 name="navigate_forms",
                 description="Navigate to forms page",
-                command=self.agent.navigate(f"{self.GHL_BASE_URL}/sites/forms"),
+                command=self.agent.navigate(self._deeplink("/sites/forms")),
                 wait_after=2.5,
             ),
             TaskStep(
@@ -618,7 +633,7 @@ class GHLBrowserTasks:
             TaskStep(
                 name="navigate_surveys",
                 description="Navigate to surveys page",
-                command=self.agent.navigate(f"{self.GHL_BASE_URL}/sites/surveys"),
+                command=self.agent.navigate(self._deeplink("/sites/surveys")),
                 wait_after=2.5,
             ),
             TaskStep(
@@ -738,7 +753,7 @@ class GHLBrowserTasks:
             TaskStep(
                 name="navigate_campaigns",
                 description="Navigate to campaigns page",
-                command=self.agent.navigate(f"{self.GHL_BASE_URL}/marketing/campaigns"),
+                command=self.agent.navigate(self._deeplink("/marketing/campaigns")),
                 wait_after=2.5,
             ),
             TaskStep(
@@ -882,7 +897,7 @@ class GHLBrowserTasks:
             TaskStep(
                 name="navigate_funnels",
                 description="Navigate to funnels page",
-                command=self.agent.navigate(f"{self.GHL_BASE_URL}/sites/funnels"),
+                command=self.agent.navigate(self._deeplink("/sites/funnels")),
                 wait_after=2.5,
             ),
             TaskStep(

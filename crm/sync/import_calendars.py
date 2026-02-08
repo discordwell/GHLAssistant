@@ -11,6 +11,7 @@ from ..models.calendar import Calendar, Appointment
 from ..models.contact import Contact
 from ..models.location import Location
 from ..schemas.sync import SyncResult
+from .raw_store import upsert_raw_entity
 
 
 async def import_calendars(
@@ -26,6 +27,13 @@ async def import_calendars(
         name = cal_data.get("name", "")
         if not name:
             continue
+        await upsert_raw_entity(
+            db,
+            location=location,
+            entity_type="calendar",
+            ghl_id=ghl_id,
+            payload=cal_data,
+        )
 
         stmt = select(Calendar).where(
             Calendar.location_id == location.id, Calendar.ghl_id == ghl_id
@@ -56,6 +64,13 @@ async def import_calendars(
             a_ghl_id = appt_data.get("id", appt_data.get("_id", ""))
             if not a_ghl_id:
                 continue
+            await upsert_raw_entity(
+                db,
+                location=location,
+                entity_type="appointment",
+                ghl_id=a_ghl_id,
+                payload=appt_data,
+            )
 
             stmt = select(Appointment).where(
                 Appointment.calendar_id == cal.id, Appointment.ghl_id == a_ghl_id

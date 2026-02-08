@@ -23,6 +23,7 @@ def analyze_session(filepath: str):
     print(f"Captured: {data.get('captured_at')}")
     print(f"Final URL: {data.get('page_state', {}).get('url')}")
     print(f"Page Title: {data.get('page_state', {}).get('title')}")
+    print(f"Network requests: {len(data.get('network_log', [])) or data.get('network_log_count', 0)}")
 
     # Auth tokens
     auth = data.get("auth", {})
@@ -52,7 +53,19 @@ def analyze_session(filepath: str):
                 print(f"\n{key}: {value[:80] if len(str(value)) > 80 else value}...")
 
     # API calls analysis
-    api_calls = data.get("api_calls", [])
+    api_calls = data.get("api_calls") or []
+    network_log = data.get("network_log") or []
+    if not api_calls and network_log:
+        static_ext = (
+            ".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".woff", ".woff2",
+            ".ttf", ".svg", ".webp", ".map", ".mp4", ".webm", ".mp3", ".zip",
+        )
+
+        def _is_static(url: str) -> bool:
+            url_l = (url or "").lower()
+            return any(ext in url_l for ext in static_ext)
+
+        api_calls = [c for c in network_log if not _is_static(c.get("url", ""))]
     print("\n" + "=" * 70)
     print(f"API CALLS ({len(api_calls)} total)")
     print("=" * 70)

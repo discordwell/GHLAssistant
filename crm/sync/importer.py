@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +19,159 @@ from ..models.opportunity import Opportunity
 from ..models.location import Location
 from ..schemas.sync import SyncResult
 from .field_mapper import ghl_contact_to_local, ghl_opportunity_to_local
+from .raw_store import upsert_raw_entity
+
+
+def _iter_custom_fields(payload: Any) -> list[dict[str, Any]]:
+    """Normalize GHL customFields payload to a list of dict items."""
+    if not payload:
+        return []
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if isinstance(payload, dict):
+        # Some APIs represent custom fields as a dict keyed by field key or id.
+        items: list[dict[str, Any]] = []
+        for key, value in payload.items():
+            if not isinstance(key, str) or not key:
+                continue
+            items.append({"fieldKey": key, "value": value})
+        return items
+    return []
+
+
+def _extract_custom_field_identifier(item: dict[str, Any]) -> tuple[str | None, str | None]:
+    """Return (ghl_definition_id, field_key) from a custom field value item."""
+    raw_id = item.get("id") or item.get("_id") or item.get("customFieldId") or item.get("fieldId")
+    ghl_id = raw_id if isinstance(raw_id, str) and raw_id else None
+
+    raw_key = item.get("fieldKey") or item.get("key") or item.get("field_key")
+    field_key = raw_key if isinstance(raw_key, str) and raw_key else None
+
+    return ghl_id, field_key
+
+
+def _extract_custom_field_value(item: dict[str, Any]) -> Any:
+    for key in ("value", "fieldValue", "field_value", "valueText", "valueNumber", "valueDate", "valueBool"):
+        if key in item:
+            return item.get(key)
+    # Some shapes use {id: ..., ...} with a single remaining non-id key.
+    return item.get("val")
+
+
+def _apply_custom_field_value(
+    cfv: CustomFieldValue,
+    *,
+    data_type: str | None,
+    raw_value: Any,
+) -> None:
+    """Set typed value columns on CustomFieldValue, clearing other columns."""
+    cfv.value_text = None
+    cfv.value_number = None
+    cfv.value_date = None
+    cfv.value_bool = None
+
+    if raw_value is None:
+        return
+
+    dt = (data_type or "").strip().lower()
+
+    if dt in {"number", "numeric", "float", "decimal", "integer"}:
+        try:
+            cfv.value_number = float(raw_value)
+            return
+        except (TypeError, ValueError):
+            pass
+
+    if dt in {"date", "datetime"}:
+        # Preserve as-is (GHL often returns ISO strings).
+        cfv.value_date = str(raw_value)
+        return
+
+    if dt in {"checkbox", "boolean", "bool"}:
+        if isinstance(raw_value, bool):
+            cfv.value_bool = raw_value
+            return
+        if isinstance(raw_value, (int, float)):
+            cfv.value_bool = bool(raw_value)
+            return
+        if isinstance(raw_value, str):
+            normalized = raw_value.strip().lower()
+            if normalized in {"true", "1", "yes", "y", "on", "active"}:
+                cfv.value_bool = True
+                return
+            if normalized in {"false", "0", "no", "n", "off", "inactive"}:
+                cfv.value_bool = False
+                return
+
+    # Default: store as text (JSON when structured).
+    if isinstance(raw_value, str):
+        cfv.value_text = raw_value
+    else:
+        cfv.value_text = json.dumps(raw_value, ensure_ascii=False, default=str)
+
+
+async def _load_custom_field_def_maps(
+    db: AsyncSession,
+    *,
+    location_id: uuid.UUID,
+    entity_type: str,
+) -> tuple[dict[str, CustomFieldDefinition], dict[str, CustomFieldDefinition]]:
+    stmt = select(CustomFieldDefinition).where(
+        CustomFieldDefinition.location_id == location_id,
+        CustomFieldDefinition.entity_type == entity_type,
+    )
+    defs = list((await db.execute(stmt)).scalars().all())
+
+    by_ghl_id: dict[str, CustomFieldDefinition] = {
+        d.ghl_id: d for d in defs if isinstance(d.ghl_id, str) and d.ghl_id
+    }
+    by_field_key: dict[str, CustomFieldDefinition] = {
+        d.field_key: d for d in defs if isinstance(d.field_key, str) and d.field_key
+    }
+    return by_ghl_id, by_field_key
+
+
+async def _upsert_custom_field_values(
+    db: AsyncSession,
+    *,
+    entity_id: uuid.UUID,
+    entity_type: str,
+    custom_fields_payload: Any,
+    defs_by_ghl_id: dict[str, CustomFieldDefinition],
+    defs_by_field_key: dict[str, CustomFieldDefinition],
+) -> None:
+    items = _iter_custom_fields(custom_fields_payload)
+    if not items:
+        return
+
+    for item in items:
+        ghl_def_id, field_key = _extract_custom_field_identifier(item)
+        defn = None
+        if ghl_def_id and ghl_def_id in defs_by_ghl_id:
+            defn = defs_by_ghl_id[ghl_def_id]
+        elif field_key and field_key in defs_by_field_key:
+            defn = defs_by_field_key[field_key]
+
+        if not defn:
+            continue
+
+        raw_value = _extract_custom_field_value(item)
+
+        stmt = select(CustomFieldValue).where(
+            CustomFieldValue.definition_id == defn.id,
+            CustomFieldValue.entity_id == entity_id,
+        )
+        cfv = (await db.execute(stmt)).scalar_one_or_none()
+
+        if not cfv:
+            cfv = CustomFieldValue(
+                definition_id=defn.id,
+                entity_id=entity_id,
+                entity_type=entity_type,
+            )
+            db.add(cfv)
+
+        _apply_custom_field_value(cfv, data_type=defn.data_type, raw_value=raw_value)
 
 
 async def import_tags(
@@ -29,6 +184,13 @@ async def import_tags(
         name = item.get("name", "")
         if not name:
             continue
+        await upsert_raw_entity(
+            db,
+            location=location,
+            entity_type="tag",
+            ghl_id=ghl_id,
+            payload=item,
+        )
 
         # Check for existing by ghl_id
         stmt = select(Tag).where(Tag.location_id == location.id, Tag.ghl_id == ghl_id)
@@ -72,6 +234,13 @@ async def import_custom_fields(
 
         if not name:
             continue
+        await upsert_raw_entity(
+            db,
+            location=location,
+            entity_type="custom_field_definition",
+            ghl_id=ghl_id,
+            payload=item,
+        )
 
         stmt = select(CustomFieldDefinition).where(
             CustomFieldDefinition.location_id == location.id,
@@ -110,6 +279,13 @@ async def import_custom_values(
 
         if not name:
             continue
+        await upsert_raw_entity(
+            db,
+            location=location,
+            entity_type="custom_value",
+            ghl_id=ghl_id,
+            payload=item,
+        )
 
         stmt = select(CustomValue).where(
             CustomValue.location_id == location.id, CustomValue.ghl_id == ghl_id
@@ -146,6 +322,13 @@ async def import_pipelines(
 
         if not name:
             continue
+        await upsert_raw_entity(
+            db,
+            location=location,
+            entity_type="pipeline",
+            ghl_id=ghl_id,
+            payload=p_data,
+        )
 
         stmt = select(Pipeline).where(
             Pipeline.location_id == location.id, Pipeline.ghl_id == ghl_id
@@ -169,6 +352,13 @@ async def import_pipelines(
         for i, s_data in enumerate(p_data.get("stages", [])):
             s_ghl_id = s_data.get("id", s_data.get("_id", ""))
             s_name = s_data.get("name", "")
+            await upsert_raw_entity(
+                db,
+                location=location,
+                entity_type="pipeline_stage",
+                ghl_id=s_ghl_id,
+                payload=s_data,
+            )
 
             stmt = select(PipelineStage).where(
                 PipelineStage.pipeline_id == pipeline.id,
@@ -201,8 +391,21 @@ async def import_contacts(
     result = SyncResult()
     contact_map: dict[str, uuid.UUID] = {}
 
+    defs_by_ghl_id, defs_by_field_key = await _load_custom_field_def_maps(
+        db,
+        location_id=location.id,
+        entity_type="contact",
+    )
+
     for c_data in contacts_data:
         ghl_id = c_data.get("id", c_data.get("_id", ""))
+        await upsert_raw_entity(
+            db,
+            location=location,
+            entity_type="contact",
+            ghl_id=ghl_id,
+            payload=c_data,
+        )
         fields = ghl_contact_to_local(c_data)
 
         if not fields:
@@ -242,6 +445,16 @@ async def import_contacts(
 
         contact_map[ghl_id] = contact.id
 
+        # Import contact custom field values
+        await _upsert_custom_field_values(
+            db,
+            entity_id=contact.id,
+            entity_type="contact",
+            custom_fields_payload=c_data.get("customFields"),
+            defs_by_ghl_id=defs_by_ghl_id,
+            defs_by_field_key=defs_by_field_key,
+        )
+
         # Import contact tags
         for tag_name in c_data.get("tags", []):
             stmt = select(Tag).where(
@@ -271,6 +484,12 @@ async def import_opportunities(
     """Import opportunities for a pipeline."""
     result = SyncResult()
 
+    defs_by_ghl_id, defs_by_field_key = await _load_custom_field_def_maps(
+        db,
+        location_id=location.id,
+        entity_type="opportunity",
+    )
+
     # Resolve pipeline
     stmt = select(Pipeline).where(
         Pipeline.location_id == location.id, Pipeline.ghl_id == pipeline_ghl_id
@@ -282,6 +501,13 @@ async def import_opportunities(
 
     for o_data in opps_data:
         ghl_id = o_data.get("id", o_data.get("_id", ""))
+        await upsert_raw_entity(
+            db,
+            location=location,
+            entity_type="opportunity",
+            ghl_id=ghl_id,
+            payload=o_data,
+        )
         fields = ghl_opportunity_to_local(o_data)
 
         # Map stage
@@ -318,7 +544,18 @@ async def import_opportunities(
                 **fields,
             )
             db.add(opp)
+            await db.flush()
             result.created += 1
+
+        # Import opportunity custom field values
+        await _upsert_custom_field_values(
+            db,
+            entity_id=opp.id,
+            entity_type="opportunity",
+            custom_fields_payload=o_data.get("customFields"),
+            defs_by_ghl_id=defs_by_ghl_id,
+            defs_by_field_key=defs_by_field_key,
+        )
 
     await db.commit()
     return result

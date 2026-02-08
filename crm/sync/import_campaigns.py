@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..models.campaign import Campaign, CampaignStep
 from ..models.location import Location
 from ..schemas.sync import SyncResult
+from .raw_store import upsert_raw_entity
 
 
 def _to_dict(value: Any) -> dict:
@@ -73,6 +74,13 @@ async def import_campaigns(
             continue
 
         detail_payload = _extract_campaign_payload(_to_dict(details_by_campaign.get(ghl_id)))
+        await upsert_raw_entity(
+            db,
+            location=location,
+            entity_type="campaign",
+            ghl_id=ghl_id,
+            payload={"list": _to_dict(c_data), "detail": _to_dict(detail_payload)},
+        )
         description = detail_payload.get("description", c_data.get("description"))
         stmt = select(Campaign).where(
             Campaign.location_id == location.id, Campaign.ghl_id == ghl_id

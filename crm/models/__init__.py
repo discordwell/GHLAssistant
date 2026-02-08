@@ -17,6 +17,7 @@ from .form import Form, FormField, FormSubmission
 from .survey import Survey, SurveyQuestion, SurveySubmission
 from .campaign import Campaign, CampaignStep, CampaignEnrollment
 from .funnel import Funnel, FunnelPage
+from .ghl_raw import GHLRawEntity
 
 __all__ = [
     "Base",
@@ -53,4 +54,5 @@ __all__ = [
     "CampaignEnrollment",
     "Funnel",
     "FunnelPage",
+    "GHLRawEntity",
 ]

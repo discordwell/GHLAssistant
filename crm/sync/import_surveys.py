@@ -13,6 +13,7 @@ from ..models.survey import Survey, SurveyQuestion, SurveySubmission
 from ..models.contact import Contact
 from ..models.location import Location
 from ..schemas.sync import SyncResult
+from .raw_store import upsert_raw_entity
 
 
 def _to_dict(value: Any) -> dict:
@@ -73,6 +74,13 @@ async def import_surveys(
             continue
 
         detail_payload = _extract_survey_payload(_to_dict(details_by_survey.get(ghl_id)))
+        await upsert_raw_entity(
+            db,
+            location=location,
+            entity_type="survey",
+            ghl_id=ghl_id,
+            payload={"list": _to_dict(s_data), "detail": _to_dict(detail_payload)},
+        )
         description = detail_payload.get("description", s_data.get("description"))
         is_active = detail_payload.get("isActive", detail_payload.get("active", True))
         if not isinstance(is_active, bool):
@@ -152,6 +160,13 @@ async def import_surveys(
             sub_ghl_id = sub_data.get("id", sub_data.get("_id"))
             if isinstance(sub_ghl_id, str) and sub_ghl_id in existing_ghl_submission_ids:
                 continue
+            await upsert_raw_entity(
+                db,
+                location=location,
+                entity_type="survey_submission",
+                ghl_id=sub_ghl_id,
+                payload=_to_dict(sub_data),
+            )
 
             submitted_at_raw = sub_data.get("createdAt", sub_data.get("submittedAt"))
             if submitted_at_raw:

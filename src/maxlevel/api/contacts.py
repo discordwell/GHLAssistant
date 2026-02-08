@@ -106,7 +106,7 @@ class ContactsAPI:
         phone: str | None = None,
         source: str = "api",
         tags: list[str] | None = None,
-        custom_fields: dict[str, Any] | None = None,
+        custom_fields: dict[str, Any] | list[dict[str, Any]] | None = None,
         location_id: str | None = None,
         **kwargs,
     ) -> dict[str, Any]:
@@ -156,7 +156,7 @@ class ContactsAPI:
         email: str | None = None,
         phone: str | None = None,
         tags: list[str] | None = None,
-        custom_fields: dict[str, Any] | None = None,
+        custom_fields: dict[str, Any] | list[dict[str, Any]] | None = None,
         **kwargs,
     ) -> dict[str, Any]:
         """Update an existing contact.

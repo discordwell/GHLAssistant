@@ -3,9 +3,14 @@
 import asyncio
 import base64
 import json
+import os
+import signal
+import subprocess
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, urlparse
 
 import nodriver as uc
 
@@ -50,6 +55,11 @@ class BrowserAgent:
         self.network_dir.mkdir(parents=True, exist_ok=True)
 
         self.screenshots: list[str] = []
+        # When we attach to an existing DevTools session (connect_existing=True),
+        # nodriver won't own the subprocess and can't reliably terminate it.
+        # Track it so we can clean up on stop.
+        self._external_debug_port: int | None = None
+        self._external_chrome_pids: list[int] = []
 
     async def __aenter__(self):
         await self.start()
@@ -58,14 +68,116 @@ class BrowserAgent:
     async def __aexit__(self, *args):
         await self.stop()
 
+    def _find_chrome_pids_for_profile(self, *, port: int, profile_dir: str) -> list[int]:
+        """Best-effort: find Chrome PIDs for a given DevTools port + user-data-dir."""
+        try:
+            out = subprocess.check_output(
+                ["ps", "-ax", "-o", "pid=,command="],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            return []
+
+        want_port = f"--remote-debugging-port={port}"
+        want_dir = f"--user-data-dir={profile_dir}"
+
+        pids: list[int] = []
+        for raw_line in out.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            # pid and command are separated by whitespace; pid is first token.
+            parts = line.split(None, 1)
+            if len(parts) != 2:
+                continue
+            pid_s, cmd = parts
+            if want_port not in cmd:
+                continue
+            if want_dir not in cmd:
+                continue
+            try:
+                pids.append(int(pid_s))
+            except ValueError:
+                continue
+
+        return pids
+
+    def _kill_pids(self, pids: list[int]) -> None:
+        for pid in pids:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                continue
+            except PermissionError:
+                continue
+            except Exception:
+                continue
+
+    async def _wait_for_devtools(self, *, host: str, port: int, timeout_seconds: float) -> bool:
+        url = f"http://{host}:{port}/json/version"
+        deadline = datetime.now().timestamp() + float(timeout_seconds)
+
+        def _probe() -> bool:
+            with urllib.request.urlopen(url, timeout=1) as resp:
+                resp.read(1)
+            return True
+
+        while datetime.now().timestamp() < deadline:
+            try:
+                await asyncio.get_running_loop().run_in_executor(None, _probe)
+                return True
+            except Exception:
+                await asyncio.sleep(0.25)
+        return False
+
     async def start(self):
         """Start the browser with persistent profile."""
-        config = uc.Config()
-        config.sandbox = False  # Required on macOS
-        config.user_data_dir = str(self.profile_dir)
-        config.headless = self.headless
+        # nodriver can occasionally race Chrome startup and fail its initial
+        # connection attempt; when that happens, Chrome may still be launching.
+        # We'll retry and/or attach to the spawned DevTools port.
+        last_exc: Exception | None = None
+        for attempt in range(1, 4):
+            config = uc.Config()
+            config.sandbox = False  # Adds --no-sandbox when False.
+            config.user_data_dir = str(self.profile_dir)
+            config.headless = self.headless
 
-        self.browser = await uc.start(config=config)
+            try:
+                self.browser = await uc.start(config=config)
+                self._external_debug_port = None
+                self._external_chrome_pids = []
+                break
+            except Exception as exc:
+                last_exc = exc
+                message = str(exc)
+                if "Failed to connect to browser" not in message:
+                    raise
+
+                host = getattr(config, "host", None)
+                port = getattr(config, "port", None)
+                if isinstance(host, str) and host and isinstance(port, int) and port:
+                    # If Chrome is still coming up, wait a bit longer for DevTools.
+                    if await self._wait_for_devtools(host=host, port=port, timeout_seconds=15.0):
+                        pids = self._find_chrome_pids_for_profile(
+                            port=port,
+                            profile_dir=str(self.profile_dir),
+                        )
+                        try:
+                            self.browser = await uc.start(host=host, port=port)
+                            self._external_debug_port = port
+                            self._external_chrome_pids = pids
+                            break
+                        except Exception:
+                            # If attach failed, kill any strays we can identify and retry.
+                            self._kill_pids(pids)
+
+                # Backoff before retrying a fresh launch.
+                await asyncio.sleep(min(2.0, 0.5 * attempt))
+
+        if not self.browser:
+            raise last_exc or RuntimeError("Failed to start browser")
 
         # Get the main page/tab
         self.page = await self.browser.get("about:blank")
@@ -82,10 +194,24 @@ class BrowserAgent:
         if self.browser:
             self.browser.stop()
             print("Browser stopped")
+        # If we attached to an existing session, ensure the subprocess is terminated.
+        if self._external_debug_port:
+            pids = self._external_chrome_pids or self._find_chrome_pids_for_profile(
+                port=self._external_debug_port,
+                profile_dir=str(self.profile_dir),
+            )
+            self._kill_pids(pids)
+            self._external_debug_port = None
+            self._external_chrome_pids = []
 
     async def navigate(self, url: str) -> dict:
         """Navigate to a URL and return page state."""
-        print(f"Navigating to: {url}")
+        normalized = self._normalize_app_url(url)
+        if normalized != url:
+            print(f"Navigating to: {url} (rewrote to: {normalized})")
+            url = normalized
+        else:
+            print(f"Navigating to: {url}")
         self.page = await self.browser.get(url)
 
         # Re-enable network capture on new page
@@ -94,6 +220,62 @@ class BrowserAgent:
 
         await self._wait_for_load()
         return await self.get_page_state()
+
+    def _normalize_app_url(self, url: str) -> str:
+        """Rewrite some GHL app URLs to deep-link form.
+
+        As of early 2026, many UI routes on app.gohighlevel.com (e.g. /contacts/)
+        return 404 when fetched directly. The web app supports deep linking via:
+
+            https://app.gohighlevel.com/?url=%2Fcontacts%2F
+        """
+        if not isinstance(url, str) or not url:
+            return url
+
+        try:
+            parsed = urlparse(url)
+        except Exception:
+            return url
+
+        if parsed.scheme not in {"http", "https"}:
+            return url
+        if parsed.netloc != "app.gohighlevel.com":
+            return url
+
+        # Already on root (including existing deep links like /?url=...).
+        if parsed.path in {"", "/"}:
+            return url
+
+        # Don't rewrite obvious static assets.
+        path_l = parsed.path.lower()
+        if any(
+            path_l.endswith(ext)
+            for ext in (
+                ".js",
+                ".css",
+                ".png",
+                ".jpg",
+                ".jpeg",
+                ".gif",
+                ".ico",
+                ".woff",
+                ".woff2",
+                ".ttf",
+                ".svg",
+                ".webp",
+                ".map",
+            )
+        ):
+            return url
+
+        inner = parsed.path
+        if parsed.query:
+            inner += f"?{parsed.query}"
+        if parsed.fragment:
+            inner += f"#{parsed.fragment}"
+
+        # Encode everything, including slashes, to match GHL's expected format.
+        return f"{parsed.scheme}://{parsed.netloc}/?url={quote(inner, safe='')}"
 
     async def _wait_for_load(self, timeout: float = 10.0):
         """Wait for page to finish loading."""
@@ -176,7 +358,7 @@ class BrowserAgent:
         """Return current document/URL cookies as a simple name->value dict.
 
         Uses `document.cookie` first (fast, but excludes HttpOnly cookies),
-        then falls back to CDP `Network.getCookies`.
+        then merges CDP `Network.getCookies` (may include HttpOnly cookies).
         """
         cookies: dict[str, str] = {}
 
@@ -194,10 +376,8 @@ class BrowserAgent:
         except Exception:
             pass
 
-        if cookies:
-            return cookies
-
-        # CDP fallback (may include HttpOnly cookies).
+        # Always merge CDP cookies as well (may include HttpOnly cookies not present
+        # in document.cookie). This significantly improves auth capture reliability.
         try:
             import nodriver.cdp.network as cdp_network
 
@@ -207,14 +387,16 @@ class BrowserAgent:
             except Exception:
                 url = None
 
-            cookie_objs = await self.page.send(
-                cdp_network.get_cookies(urls=[url] if isinstance(url, str) and url else None)
-            )
+            kwargs: dict[str, Any] = {}
+            if isinstance(url, str) and url:
+                kwargs["urls"] = [url]
+
+            cookie_objs = await self.page.send(cdp_network.get_cookies(**kwargs))
             for cookie in cookie_objs:
                 name = getattr(cookie, "name", None)
                 value = getattr(cookie, "value", None)
                 if isinstance(name, str) and name and isinstance(value, str):
-                    cookies[name] = value
+                    cookies.setdefault(name, value)
         except Exception:
             pass
 
@@ -550,13 +732,21 @@ class BrowserAgent:
                 self.network_dir / f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
             )
 
+        cookie_auth = None
+        try:
+            cookie_auth = await self.extract_cookie_auth()
+        except Exception:
+            cookie_auth = None
+
         session_data = {
             "profile": self.profile_name,
             "captured_at": datetime.now().isoformat(),
             "page_state": await self.get_page_state(),
             "screenshots": self.screenshots,
             "auth": self.get_auth_tokens(),
+            "cookie_auth": cookie_auth,
             "api_calls": self.get_api_calls(),
+            "network_log": self.get_network_log(),
             "network_log_count": len(self.get_network_log()),
         }
 

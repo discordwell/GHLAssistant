@@ -9,6 +9,7 @@ system-level encryption (FileVault, LUKS) or a secrets manager.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 from dataclasses import dataclass, field, asdict
@@ -19,6 +20,36 @@ from typing import Any
 
 # Default storage directory
 DEFAULT_CONFIG_DIR = Path.home() / ".ghl"
+
+
+def _jwt_payload_unverified(token: str) -> dict[str, Any] | None:
+    """Decode a JWT payload without verifying its signature.
+
+    Used only for token health UX (expiration display). If the token is not a
+    JWT, returns None.
+    """
+    if not isinstance(token, str) or token.count(".") < 2:
+        return None
+    try:
+        parts = token.split(".")
+        payload_b64 = parts[1]
+        padding = "=" * ((4 - (len(payload_b64) % 4)) % 4)
+        raw = base64.urlsafe_b64decode(payload_b64 + padding)
+        payload = json.loads(raw)
+        return payload if isinstance(payload, dict) else None
+    except Exception:
+        return None
+
+
+def _jwt_exp_unverified(token: str) -> int | None:
+    """Best-effort JWT exp claim (unix timestamp)."""
+    payload = _jwt_payload_unverified(token)
+    if not payload:
+        return None
+    exp = payload.get("exp")
+    if isinstance(exp, (int, float)):
+        return int(exp)
+    return None
 
 
 @dataclass
@@ -303,11 +334,19 @@ class TokenStorage:
             }
 
         if data.session:
-            status["session_token"] = {
+            session_status: dict[str, Any] = {
                 "age_hours": round(data.session.age_hours, 1),
                 "location_id": data.session.location_id,
                 "company_id": data.session.company_id,
                 "user_id": data.session.user_id,
             }
+            exp = _jwt_exp_unverified(data.session.token)
+            if exp is not None:
+                now = int(datetime.now().timestamp())
+                session_status["expires_at"] = exp
+                session_status["expires_in_seconds"] = max(0, int(exp - now))
+                # Small skew to avoid flapping at expiry time.
+                session_status["valid"] = exp > now + 30
+            status["session_token"] = session_status
 
         return status

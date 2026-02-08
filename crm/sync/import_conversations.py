@@ -11,6 +11,7 @@ from ..models.conversation import Conversation, Message
 from ..models.contact import Contact
 from ..models.location import Location
 from ..schemas.sync import SyncResult
+from .raw_store import upsert_raw_entity
 
 
 async def import_conversations(
@@ -25,6 +26,13 @@ async def import_conversations(
         ghl_id = c_data.get("id", c_data.get("_id", ""))
         if not ghl_id:
             continue
+        await upsert_raw_entity(
+            db,
+            location=location,
+            entity_type="conversation",
+            ghl_id=ghl_id,
+            payload=c_data,
+        )
 
         # Resolve contact
         contact_id = None
@@ -66,6 +74,13 @@ async def import_conversations(
             m_ghl_id = m_data.get("id", m_data.get("_id", ""))
             if not m_ghl_id:
                 continue
+            await upsert_raw_entity(
+                db,
+                location=location,
+                entity_type="message",
+                ghl_id=m_ghl_id,
+                payload=m_data,
+            )
 
             stmt = select(Message).where(
                 Message.conversation_id == conv.id,

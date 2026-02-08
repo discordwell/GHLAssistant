@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..models.funnel import Funnel, FunnelPage
 from ..models.location import Location
 from ..schemas.sync import SyncResult
+from .raw_store import upsert_raw_entity
 
 
 def _to_dict(value: Any) -> dict:
@@ -64,6 +65,13 @@ async def import_funnels(
             continue
 
         detail_payload = _extract_funnel_payload(_to_dict(details_by_funnel.get(ghl_id)))
+        await upsert_raw_entity(
+            db,
+            location=location,
+            entity_type="funnel",
+            ghl_id=ghl_id,
+            payload={"list": _to_dict(f_data), "detail": _to_dict(detail_payload)},
+        )
         description = detail_payload.get("description", f_data.get("description"))
         is_published = _is_true(
             detail_payload.get("isPublished", f_data.get("isPublished", False)),
@@ -99,6 +107,13 @@ async def import_funnels(
             p_name = p_data.get("name", f"Page {i+1}")
             slug = p_data.get("slug", p_data.get("path", f"page-{i+1}"))
             page_detail = _extract_page_payload(_to_dict(details_for_funnel.get(p_ghl_id, {})))
+            await upsert_raw_entity(
+                db,
+                location=location,
+                entity_type="funnel_page",
+                ghl_id=p_ghl_id,
+                payload={"list": _to_dict(p_data), "detail": _to_dict(page_detail)},
+            )
 
             content_html = (
                 page_detail.get("html")

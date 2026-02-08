@@ -98,15 +98,46 @@ def auth_quick(
             console.print("[dim]Opening browser...[/dim]")
             await agent.navigate("https://app.gohighlevel.com/")
 
-            # Prefer cookie-based capture (works even when UI shows login screen).
-            cookie_auth = await agent.extract_cookie_auth()
-            cookie_token = cookie_auth.get("access_token") if cookie_auth else None
+            import base64
+            import time
+            import httpx
 
-            if cookie_token:
-                console.print("[green]Found session token in cookies.[/green]")
-            else:
+            started_at = time.time()
+            login_prompted = False
+            refresh_prompted = False
+            attempt = 0
+            contacts_nav_done = False
+            last_cookie_token: str | None = None
+            last_vue_token: str | None = None
+
+            cookie_auth: dict[str, Any] | None = None
+            cookie_token: str | None = None
+            vue_data: dict[str, Any] | None = None
+            vue_token: str | None = None
+            tokens: dict[str, Any] = {}
+            ghl_data: dict[str, Any] = {}
+            access_token: str | None = None
+            chosen_method: str | None = None
+
+            # Keep trying until we capture a usable token or timeout.
+            while time.time() - started_at < timeout:
+                attempt += 1
+
+                # Prefer cookie-based capture (works even when UI shows login screen).
+                cookie_auth = await agent.extract_cookie_auth()
+                cookie_token = cookie_auth.get("access_token") if cookie_auth else None
+
+                if cookie_token and attempt == 1:
+                    console.print("[green]Found session token in cookies.[/green]")
+
                 # Check if logged in (UI) and prompt if needed
-                if not await agent.is_logged_in():
+                logged_in = True
+                try:
+                    logged_in = bool(await agent.is_logged_in())
+                except Exception:
+                    logged_in = True
+
+                if not logged_in and not login_prompted and not cookie_token:
                     console.print(
                         Panel(
                             "[bold yellow]Please log in to GoHighLevel in the browser window.[/bold yellow]\n\n"
@@ -114,44 +145,164 @@ def auth_quick(
                             title="Login Required",
                         )
                     )
+                    login_prompted = True
 
-                    # Wait for login
-                    import time
-                    start = time.time()
-                    while time.time() - start < timeout:
-                        await asyncio.sleep(2)
-                        if await agent.is_logged_in():
-                            console.print("[green]Login detected![/green]")
-                            break
-                    else:
-                        return {"success": False, "error": "Login timeout"}
+                # Try Vue store extraction (fast)
+                if attempt == 1:
+                    console.print("[dim]Extracting token from Vue store...[/dim]")
+                vue_data = await agent.extract_vue_token()
+                vue_token = None
+                if vue_data and vue_data.get("authToken"):
+                    vue_token = vue_data["authToken"]
 
-            # Try Vue store extraction first (fastest method)
-            console.print("[dim]Extracting token from Vue store...[/dim]")
-            vue_data = await agent.extract_vue_token()
-            vue_token = None
-            if vue_data and vue_data.get("authToken"):
-                vue_token = vue_data["authToken"]
+                # Collect network tokens (best-effort; may be absent if auth uses cookies)
+                if attempt == 1:
+                    console.print("[dim]Collecting network tokens...[/dim]")
+                await asyncio.sleep(2)
 
-            # Fall back to network capture
-            console.print("[dim]Collecting network tokens...[/dim]")
-            await asyncio.sleep(3)
-
-            tokens = agent.get_auth_tokens()
-            ghl_data = agent.network.get_ghl_specific() if agent.network else {}
-
-            if not tokens.get("access_token"):
-                # Navigate to a data-heavy page to trigger API calls
-                await agent.navigate("https://app.gohighlevel.com/contacts/")
-                await asyncio.sleep(3)
                 tokens = agent.get_auth_tokens()
                 ghl_data = agent.network.get_ghl_specific() if agent.network else {}
 
-            # Prefer the cookie `m_a` token. Network capture can surface other tokens
-            # that are not accepted by backend.leadconnectorhq.com endpoints.
-            access_token = cookie_token or vue_token or tokens.get("access_token")
+                token_changed = False
+                if cookie_token and cookie_token != last_cookie_token:
+                    token_changed = True
+                    last_cookie_token = cookie_token
+                if vue_token and vue_token != last_vue_token:
+                    token_changed = True
+                    last_vue_token = vue_token
+                if token_changed:
+                    contacts_nav_done = False
+
+                if not contacts_nav_done and (attempt == 1 or token_changed):
+                    # Trigger location-scoped API calls and token refresh by visiting a data-heavy page.
+                    try:
+                        await agent.navigate("https://app.gohighlevel.com/contacts/")
+                    except Exception:
+                        await asyncio.sleep(2)
+                        continue
+                    await asyncio.sleep(3)
+                    contacts_nav_done = True
+                    tokens = agent.get_auth_tokens()
+                    ghl_data = agent.network.get_ghl_specific() if agent.network else {}
+
+                # Refresh cookie/vue tokens after any navigation that may trigger auth refresh.
+                refreshed_cookie_auth = await agent.extract_cookie_auth()
+                if refreshed_cookie_auth:
+                    cookie_auth = refreshed_cookie_auth
+                    cookie_token = cookie_auth.get("access_token") if cookie_auth else cookie_token
+
+                refreshed_vue_data = await agent.extract_vue_token()
+                if refreshed_vue_data and refreshed_vue_data.get("authToken"):
+                    vue_data = refreshed_vue_data
+                    vue_token = vue_data.get("authToken")
+
+                # Choose the best token:
+                # - Prefer unexpired JWTs
+                # - Prefer cookie `m_a` when valid (often best for backend.leadconnectorhq.com),
+                #   but don't keep an expired cookie token if Vue/network has a fresher one.
+
+                def _jwt_exp(token: str) -> int | None:
+                    try:
+                        parts = token.split(".")
+                        if len(parts) < 2:
+                            return None
+                        payload_b64 = parts[1]
+                        padding = "=" * ((4 - (len(payload_b64) % 4)) % 4)
+                        payload = json.loads(base64.urlsafe_b64decode(payload_b64 + padding))
+                        exp = payload.get("exp")
+                        if isinstance(exp, (int, float)):
+                            return int(exp)
+                    except Exception:
+                        return None
+                    return None
+
+                now = time.time()
+
+                def _is_expired(token: str, *, skew_seconds: int = 30) -> bool:
+                    exp = _jwt_exp(token)
+                    return exp is not None and exp <= now + float(skew_seconds)
+
+                # Build candidate tokens (deduped) in a sane preference order.
+                seen: set[str] = set()
+                candidates: list[tuple[str, str]] = []
+
+                def _add(label: str, token: str | None) -> None:
+                    if not isinstance(token, str) or not token:
+                        return
+                    if token in seen:
+                        return
+                    seen.add(token)
+                    candidates.append((label, token))
+
+                _add("cookie", cookie_token)
+                _add("vue_store", vue_token)
+                _add("network_capture", tokens.get("access_token"))
+
+                if not candidates:
+                    await asyncio.sleep(2)
+                    continue
+
+                # If we know the company id, probe tokens until one works.
+                # (401 is the main failure mode when we accidentally captured a stale JWT.)
+                company_id_probe = (
+                    (cookie_auth.get("company_id") if cookie_auth else None)
+                    or ghl_data.get("auth", {}).get("companyId")
+                    or (vue_data.get("companyId") if vue_data else None)
+                )
+
+                async def _probe_token(token: str) -> bool:
+                    if not isinstance(company_id_probe, str) or not company_id_probe:
+                        # Can't probe without company id; accept token.
+                        return True
+                    try:
+                        async with httpx.AsyncClient(timeout=10.0) as client:
+                            resp = await client.get(
+                                "https://backend.leadconnectorhq.com/locations/search",
+                                params={"companyId": company_id_probe},
+                                headers={
+                                    "Authorization": f"Bearer {token}",
+                                    "Accept": "application/json, text/plain, */*",
+                                    "Content-Type": "application/json",
+                                    "version": "2021-07-28",
+                                    "channel": "APP",
+                                    "source": "WEB_USER",
+                                },
+                            )
+                        return resp.status_code != 401
+                    except Exception:
+                        # If probe fails due to network, don't block capture.
+                        return True
+
+                ordered: list[tuple[str, str]] = []
+                ordered.extend([(label, tok) for label, tok in candidates if not _is_expired(tok)])
+                ordered.extend([(label, tok) for label, tok in candidates if _is_expired(tok)])
+
+                access_token = None
+                chosen_method = None
+                for label, tok in ordered:
+                    if await _probe_token(tok):
+                        access_token = tok
+                        chosen_method = label
+                        break
+
+                if not access_token:
+                    if not refresh_prompted:
+                        console.print(
+                            Panel(
+                                "[bold yellow]Session appears expired or unauthorized.[/bold yellow]\n\n"
+                                "If the browser shows a login screen, sign in.\n"
+                                "If you're already signed in, try refreshing the page and re-opening Contacts.\n\n"
+                                "[dim]Waiting for a fresh session token...[/dim]",
+                                title="Re-auth Required",
+                            )
+                        )
+                        refresh_prompted = True
+                    await asyncio.sleep(2)
+                    continue
+                break
+
             if not access_token:
-                return {"success": False, "error": "Could not capture auth token"}
+                return {"success": False, "error": "Login timeout (could not capture a usable token)"}
 
             # If token exists but location isn't detected yet, force another location-scoped route.
             location_id = ghl_data.get("location_id")
@@ -190,7 +341,7 @@ def auth_quick(
                 "location_id": location_id,
                 "company_id": company_id,
                 "user_id": user_id,
-                "method": "cookie" if cookie_token else ("network_capture" if tokens.get("access_token") else "vue_store"),
+                "method": chosen_method or "unknown",
             }
 
     try:
@@ -270,8 +421,21 @@ def auth_status():
             age_str = f"[red]{age:.1f}h ago (may be expired)[/red]"
 
         console.print(f"\n[bold cyan]Session Token[/bold cyan]")
-        console.print(f"  Status: [green]Available[/green]")
+        expires_in = session_info.get("expires_in_seconds")
+        is_valid = session_info.get("valid")
+        if isinstance(is_valid, bool) and is_valid is False:
+            console.print(f"  Status: [red]Expired[/red]")
+        else:
+            console.print(f"  Status: [green]Available[/green]")
         console.print(f"  Captured: {age_str}")
+        if isinstance(expires_in, int):
+            if expires_in > 3600:
+                exp_str = f"[green]{expires_in // 3600}h {(expires_in % 3600) // 60}m[/green]"
+            elif expires_in > 300:
+                exp_str = f"[yellow]{expires_in // 60}m[/yellow]"
+            else:
+                exp_str = f"[red]{expires_in}s[/red]"
+            console.print(f"  Expires in: {exp_str}")
         console.print(f"  Company ID: {session_info.get('company_id', 'N/A')}")
         console.print(f"  Location ID: {session_info.get('location_id', 'N/A')}")
         console.print(f"  User ID: {session_info.get('user_id', 'N/A')}")
@@ -796,6 +960,153 @@ def templates_import(template_id: str):
 # ============================================================================
 # Browser Commands
 # ============================================================================
+
+
+@browser_app.command("open")
+def browser_open(
+    url: str = typer.Option(
+        "https://app.gohighlevel.com/",
+        "--url", "-u",
+        help="Starting URL",
+    ),
+    profile: str = typer.Option(
+        "ghl_session",
+        "--profile", "-p",
+        help="Browser profile name (for cookie persistence)",
+    ),
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        help="Run headless (no UI window)",
+    ),
+):
+    """Open a persistent browser session for manual poking.
+
+    This does not capture network traffic; it's intended for interactive use.
+    Press Ctrl+C in the terminal to close the browser.
+    """
+    from .browser.agent import BrowserAgent
+
+    async def _open():
+        async with BrowserAgent(profile_name=profile, headless=headless, capture_network=False) as agent:
+            await agent.navigate(url)
+            console.print(
+                Panel(
+                    f"[bold cyan]Browser Open[/bold cyan]\n\n"
+                    f"URL: {url}\n"
+                    f"Profile: {profile}\n"
+                    f"Headless: {headless}\n\n"
+                    "[dim]Use the browser window to interact. Press Ctrl+C here to close.[/dim]",
+                    title="Browser Agent",
+                )
+            )
+
+            try:
+                while True:
+                    await asyncio.sleep(1)
+            except KeyboardInterrupt:
+                return {"success": True}
+
+    try:
+        asyncio.run(_open())
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Browser closed[/yellow]")
+    except Exception as e:
+        console.print(f"\n[red]Error: {e}[/red]")
+
+
+@browser_app.command("profiles")
+def browser_profiles(
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """List available persistent browser profiles.
+
+    Profiles are stored under data/browser_profiles/<profile_name>.
+    """
+    from datetime import datetime
+    from .browser.agent import DATA_DIR
+
+    profiles_dir = DATA_DIR / "browser_profiles"
+    if not profiles_dir.exists():
+        _output_result({"profiles": [], "path": str(profiles_dir)}, json_output=json_output)
+        return
+
+    profiles: list[dict[str, Any]] = []
+    for entry in sorted(profiles_dir.iterdir(), key=lambda p: p.name.lower()):
+        if not entry.is_dir():
+            continue
+        try:
+            mtime = entry.stat().st_mtime
+        except Exception:
+            mtime = None
+        profiles.append(
+            {
+                "name": entry.name,
+                "path": str(entry),
+                "modified_at": datetime.fromtimestamp(mtime).isoformat() if mtime else None,
+            }
+        )
+
+    if json_output:
+        _output_result({"profiles": profiles, "path": str(profiles_dir)}, json_output=True)
+        return
+
+    if not profiles:
+        console.print(f"[dim]No profiles found under {profiles_dir}[/dim]")
+        return
+
+    table = Table(title="Browser Profiles")
+    table.add_column("Name", style="cyan")
+    table.add_column("Last Modified", style="white")
+    table.add_column("Path", style="dim")
+    for profile in profiles:
+        table.add_row(
+            str(profile.get("name", "")),
+            str(profile.get("modified_at") or ""),
+            str(profile.get("path", "")),
+        )
+    console.print(table)
+
+
+@browser_app.command("shot")
+def browser_shot(
+    url: str = typer.Option(
+        "https://app.gohighlevel.com/",
+        "--url", "-u",
+        help="URL to screenshot",
+    ),
+    profile: str = typer.Option(
+        "ghl_session",
+        "--profile", "-p",
+        help="Browser profile name (for cookie persistence)",
+    ),
+    name: str = typer.Option(
+        None,
+        "--name", "-n",
+        help="Screenshot name (without extension)",
+    ),
+    headless: bool = typer.Option(
+        True,
+        "--headless/--show",
+        help="Run headless (default) or show a UI window",
+    ),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """Open a browser briefly, navigate, take a screenshot, and exit."""
+    from .browser.agent import BrowserAgent
+
+    async def _shot():
+        async with BrowserAgent(profile_name=profile, headless=headless, capture_network=False) as agent:
+            await agent.navigate(url)
+            path = await agent.screenshot(name)
+            return {"success": True, "path": path}
+
+    try:
+        result = asyncio.run(_shot())
+    except Exception as e:
+        result = {"success": False, "error": str(e)}
+
+    _output_result(result, json_output=json_output)
 
 
 @browser_app.command("capture")

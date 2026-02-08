@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlparse
 
 import nodriver.cdp.network as network
 
@@ -23,6 +24,9 @@ class CapturedRequest:
     response_status: int | None = None
     response_headers: dict | None = None
     response_body: str | None = None
+    response_body_truncated: bool = False
+    response_body_base64: bool = False
+    response_body_length: int | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -35,6 +39,9 @@ class CapturedRequest:
             "response_status": self.response_status,
             "response_headers": self.response_headers,
             "response_body": self.response_body,
+            "response_body_truncated": self.response_body_truncated,
+            "response_body_base64": self.response_body_base64,
+            "response_body_length": self.response_body_length,
         }
 
 
@@ -51,10 +58,82 @@ class NetworkCapture:
         tokens = network.find_auth_tokens()
     """
 
-    def __init__(self, page):
+    _STATIC_EXTENSIONS = (
+        ".js",
+        ".css",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".ico",
+        ".woff",
+        ".woff2",
+        ".ttf",
+        ".svg",
+        ".webp",
+        ".map",
+        ".mp4",
+        ".webm",
+        ".mp3",
+        ".zip",
+    )
+
+    def __init__(
+        self,
+        page,
+        *,
+        capture_response_bodies: bool = True,
+        max_response_body_chars: int = 200_000,
+        max_post_data_chars: int = 50_000,
+    ):
         self.page = page
         self.requests: dict[str, CapturedRequest] = {}
         self._enabled = False
+        self.capture_response_bodies = capture_response_bodies
+        self.max_response_body_chars = max_response_body_chars
+        self.max_post_data_chars = max_post_data_chars
+
+    def _is_static_resource(self, url: str) -> bool:
+        url_l = (url or "").lower()
+        return any(ext in url_l for ext in self._STATIC_EXTENSIONS)
+
+    def _should_capture_body(self, url: str, response_headers: dict | None) -> bool:
+        if not self.capture_response_bodies:
+            return False
+        if not isinstance(url, str) or not url:
+            return False
+        if self._is_static_resource(url):
+            return False
+
+        # Keep response bodies only for GHL backend-ish domains (helps avoid
+        # huge HTML/static payloads that make session logs unusable).
+        try:
+            host = urlparse(url).netloc.lower()
+        except Exception:
+            host = ""
+        if "leadconnectorhq.com" not in host:
+            return False
+
+        ct = ""
+        content_length: int | None = None
+        if isinstance(response_headers, dict):
+            for k, v in response_headers.items():
+                if isinstance(k, str) and k.lower() == "content-type" and isinstance(v, str):
+                    ct = v.lower()
+                if isinstance(k, str) and k.lower() == "content-length" and isinstance(v, str):
+                    try:
+                        content_length = int(v.strip())
+                    except Exception:
+                        content_length = None
+
+        if isinstance(content_length, int) and content_length > self.max_response_body_chars:
+            return False
+
+        # Default to capturing if content-type is missing (some responses omit it),
+        # otherwise only capture likely-text content.
+        if not ct:
+            return True
+        return ("json" in ct) or ct.startswith("text/")
 
     async def enable(self):
         """Enable network monitoring."""
@@ -76,12 +155,16 @@ class NetworkCapture:
     async def _on_request(self, event: network.RequestWillBeSent):
         """Handle outgoing request."""
         try:
+            post_data = event.request.post_data if hasattr(event.request, "post_data") else None
+            if isinstance(post_data, str) and len(post_data) > self.max_post_data_chars:
+                post_data = post_data[: self.max_post_data_chars] + "... [truncated]"
+
             req = CapturedRequest(
                 request_id=str(event.request_id),
                 url=event.request.url,
                 method=event.request.method,
                 headers=dict(event.request.headers) if event.request.headers else {},
-                post_data=event.request.post_data if hasattr(event.request, "post_data") else None,
+                post_data=post_data,
             )
             self.requests[req.request_id] = req
         except Exception as e:
@@ -98,12 +181,38 @@ class NetworkCapture:
                     dict(event.response.headers) if event.response.headers else {}
                 )
 
+                if not self._should_capture_body(req.url, req.response_headers):
+                    return
+
                 # Try to get response body (may fail for some requests)
                 try:
-                    body_result = await self.page.send(
-                        network.get_response_body(event.request_id)
+                    body_result = await self.page.send(network.get_response_body(event.request_id))
+                    if not body_result:
+                        return
+
+                    body = getattr(body_result, "body", None)
+                    base64_encoded = bool(
+                        getattr(
+                            body_result,
+                            "base64_encoded",
+                            getattr(body_result, "base64Encoded", False),
+                        )
                     )
-                    req.response_body = body_result.body if body_result else None
+
+                    if base64_encoded:
+                        req.response_body_base64 = True
+                        req.response_body_length = len(body) if isinstance(body, str) else None
+                        return
+
+                    if isinstance(body, str):
+                        req.response_body_length = len(body)
+                        if len(body) > self.max_response_body_chars:
+                            req.response_body = (
+                                body[: self.max_response_body_chars] + "... [truncated]"
+                            )
+                            req.response_body_truncated = True
+                        else:
+                            req.response_body = body
                 except Exception:
                     pass  # Body not available for all requests
         except Exception as e:
@@ -125,7 +234,7 @@ class NetworkCapture:
             # Skip static resources
             if any(
                 ext in req.url.lower()
-                for ext in [".js", ".css", ".png", ".jpg", ".gif", ".ico", ".woff", ".svg"]
+                for ext in self._STATIC_EXTENSIONS
             ):
                 continue
 

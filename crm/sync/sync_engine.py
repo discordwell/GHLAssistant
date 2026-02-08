@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.location import Location
@@ -14,13 +16,15 @@ from .importer import (
     import_contacts,
     import_opportunities,
 )
-from .exporter import export_tags, export_contacts, export_opportunities
+from .exporter import export_tags, export_contacts, export_notes, export_tasks, export_opportunities
 from .import_conversations import import_conversations
 from .import_calendars import import_calendars
 from .import_forms import import_forms
 from .import_surveys import import_surveys
 from .import_campaigns import import_campaigns
 from .import_funnels import import_funnels
+from .import_notes import import_notes
+from .import_tasks import import_tasks
 from .export_conversations import export_conversations
 from .export_calendars import export_calendars
 from .archive import write_sync_archive
@@ -361,6 +365,72 @@ async def run_import(db: AsyncSession, location: Location) -> SyncResult:
         total.created += r.created
         total.updated += r.updated
 
+        # 6b. Notes + Tasks (per-contact; best-effort)
+        contact_ids = [cid for cid in contact_map.keys() if isinstance(cid, str) and cid]
+
+        async def _fetch_by_contact(fetch_fn, key: str) -> dict[str, list[dict]]:
+            out: dict[str, list[dict]] = {}
+            if not contact_ids:
+                return out
+
+            sem = asyncio.Semaphore(10)
+
+            async def _one(cid: str) -> tuple[str, list[dict], str | None]:
+                async with sem:
+                    try:
+                        resp = await fetch_fn(cid)
+                    except Exception as exc:
+                        return cid, [], str(exc)
+                    items = resp.get(key, [])
+                    if not isinstance(items, list):
+                        items = []
+                    return cid, [item for item in items if isinstance(item, dict)], None
+
+            batch_size = 100
+            for i in range(0, len(contact_ids), batch_size):
+                batch = contact_ids[i:i + batch_size]
+                results = await asyncio.gather(*(_one(cid) for cid in batch))
+                for cid, items, err in results:
+                    if err:
+                        total.errors.append(f"{key} fetch error for contact {cid}: {err}")
+                        continue
+                    if items:
+                        out[cid] = items
+
+            return out
+
+        try:
+            notes_by_contact = await _fetch_by_contact(
+                lambda cid: ghl.contacts.get_notes(cid, location_id=lid),
+                "notes",
+            )
+        except Exception as e:
+            notes_by_contact = {}
+            total.errors.append(f"Notes import error: {e}")
+
+        if notes_by_contact:
+            write_sync_archive(archive_key, "notes", notes_by_contact)
+            r = await import_notes(db, location, notes_by_contact, contact_map=contact_map)
+            total.created += r.created
+            total.updated += r.updated
+            total.errors.extend(r.errors)
+
+        try:
+            tasks_by_contact = await _fetch_by_contact(
+                lambda cid: ghl.contacts.get_tasks(cid, location_id=lid),
+                "tasks",
+            )
+        except Exception as e:
+            tasks_by_contact = {}
+            total.errors.append(f"Tasks import error: {e}")
+
+        if tasks_by_contact:
+            write_sync_archive(archive_key, "tasks", tasks_by_contact)
+            r = await import_tasks(db, location, tasks_by_contact, contact_map=contact_map)
+            total.created += r.created
+            total.updated += r.updated
+            total.errors.extend(r.errors)
+
         # 7. Opportunities per pipeline
         opportunities_by_pipeline: dict[str, list[dict]] = {}
         for p_data in pipelines_data:
@@ -652,6 +722,19 @@ async def run_export(db: AsyncSession, location: Location) -> SyncResult:
         r = await export_contacts(db, location, ghl)
         total.created += r.created
         total.updated += r.updated
+        total.errors.extend(r.errors)
+
+        # 2b. Notes + Tasks (best-effort, create-only)
+        r = await export_notes(db, location, ghl)
+        total.created += r.created
+        total.updated += r.updated
+        total.skipped += r.skipped
+        total.errors.extend(r.errors)
+
+        r = await export_tasks(db, location, ghl)
+        total.created += r.created
+        total.updated += r.updated
+        total.skipped += r.skipped
         total.errors.extend(r.errors)
 
         # 3. Opportunities
