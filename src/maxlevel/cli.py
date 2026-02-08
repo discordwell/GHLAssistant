@@ -98,45 +98,43 @@ def auth_quick(
             console.print("[dim]Opening browser...[/dim]")
             await agent.navigate("https://app.gohighlevel.com/")
 
-            # Check if logged in
-            if not await agent.is_logged_in():
-                console.print(
-                    Panel(
-                        "[bold yellow]Please log in to GoHighLevel in the browser window.[/bold yellow]\n\n"
-                        "Your session will be saved for future API access.",
-                        title="Login Required",
-                    )
-                )
+            # Prefer cookie-based capture (works even when UI shows login screen).
+            cookie_auth = await agent.extract_cookie_auth()
+            cookie_token = cookie_auth.get("access_token") if cookie_auth else None
 
-                # Wait for login
-                import time
-                start = time.time()
-                while time.time() - start < timeout:
-                    await asyncio.sleep(2)
-                    if await agent.is_logged_in():
-                        console.print("[green]Login detected![/green]")
-                        break
-                else:
-                    return {"success": False, "error": "Login timeout"}
+            if cookie_token:
+                console.print("[green]Found session token in cookies.[/green]")
+            else:
+                # Check if logged in (UI) and prompt if needed
+                if not await agent.is_logged_in():
+                    console.print(
+                        Panel(
+                            "[bold yellow]Please log in to GoHighLevel in the browser window.[/bold yellow]\n\n"
+                            "Your session will be saved for future API access.",
+                            title="Login Required",
+                        )
+                    )
+
+                    # Wait for login
+                    import time
+                    start = time.time()
+                    while time.time() - start < timeout:
+                        await asyncio.sleep(2)
+                        if await agent.is_logged_in():
+                            console.print("[green]Login detected![/green]")
+                            break
+                    else:
+                        return {"success": False, "error": "Login timeout"}
 
             # Try Vue store extraction first (fastest method)
             console.print("[dim]Extracting token from Vue store...[/dim]")
             vue_data = await agent.extract_vue_token()
+            vue_token = None
             if vue_data and vue_data.get("authToken"):
-                manager = TokenManager()
-                manager.save_session_from_capture(
-                    token=vue_data["authToken"],
-                    company_id=vue_data.get("companyId"),
-                    user_id=vue_data.get("userId"),
-                )
-                return {
-                    "success": True,
-                    "company_id": vue_data.get("companyId"),
-                    "method": "vue_store",
-                }
+                vue_token = vue_data["authToken"]
 
             # Fall back to network capture
-            console.print("[dim]Vue store extraction failed, trying network capture...[/dim]")
+            console.print("[dim]Collecting network tokens...[/dim]")
             await asyncio.sleep(3)
 
             tokens = agent.get_auth_tokens()
@@ -149,23 +147,50 @@ def auth_quick(
                 tokens = agent.get_auth_tokens()
                 ghl_data = agent.network.get_ghl_specific() if agent.network else {}
 
-            if not tokens.get("access_token"):
+            # Prefer the cookie `m_a` token. Network capture can surface other tokens
+            # that are not accepted by backend.leadconnectorhq.com endpoints.
+            access_token = cookie_token or vue_token or tokens.get("access_token")
+            if not access_token:
                 return {"success": False, "error": "Could not capture auth token"}
+
+            # If token exists but location isn't detected yet, force another location-scoped route.
+            location_id = ghl_data.get("location_id")
+            if not location_id or location_id == "undefined":
+                await agent.navigate("https://app.gohighlevel.com/contacts/")
+                await asyncio.sleep(4)
+                ghl_data = agent.network.get_ghl_specific() if agent.network else {}
+                location_id = ghl_data.get("location_id")
+
+            if location_id == "undefined":
+                location_id = None
+
+            company_id = (
+                (cookie_auth.get("company_id") if cookie_auth else None)
+                or ghl_data.get("auth", {}).get("companyId")
+                or (vue_data.get("companyId") if vue_data else None)
+            )
+
+            user_id = (
+                (cookie_auth.get("user_id") if cookie_auth else None)
+                or ghl_data.get("auth", {}).get("userId")
+                or (vue_data.get("userId") if vue_data else None)
+            )
 
             # Save to token manager
             manager = TokenManager()
             manager.save_session_from_capture(
-                token=tokens["access_token"],
-                location_id=ghl_data.get("location_id"),
-                company_id=ghl_data.get("auth", {}).get("companyId"),
-                user_id=ghl_data.get("auth", {}).get("userId"),
+                token=access_token,
+                location_id=location_id,
+                company_id=company_id,
+                user_id=user_id,
             )
 
             return {
                 "success": True,
-                "location_id": ghl_data.get("location_id"),
-                "company_id": ghl_data.get("auth", {}).get("companyId"),
-                "method": "network_capture",
+                "location_id": location_id,
+                "company_id": company_id,
+                "user_id": user_id,
+                "method": "cookie" if cookie_token else ("network_capture" if tokens.get("access_token") else "vue_store"),
             }
 
     try:
@@ -367,6 +392,84 @@ def auth_bridge(
         raise typer.Exit(1)
     finally:
         server.stop()
+
+
+@auth_app.command("use-location")
+def auth_use_location(
+    location_id: str | None = typer.Option(
+        None,
+        "--location-id",
+        "-l",
+        help="Set the default location ID for the current session token",
+    ),
+    name: str | None = typer.Option(
+        None,
+        "--name",
+        "-n",
+        help="Resolve a location by name (case-insensitive exact match) and set it as default",
+    ),
+):
+    """Set default location_id on the stored session token.
+
+    Useful when a company has multiple locations and you want CLI commands
+    to target a specific sub-account by default.
+    """
+    from .auth import TokenManager
+
+    manager = TokenManager()
+    data = manager.storage.load()
+
+    if not data.session or not data.session.token:
+        console.print("[red]No session token found. Run 'maxlevel auth quick' first.[/red]")
+        raise typer.Exit(1)
+
+    if not location_id and not name:
+        console.print("[red]Provide --location-id or --name[/red]")
+        raise typer.Exit(1)
+
+    if name and not location_id:
+        from .api import GHLClient
+
+        async def _resolve():
+            async with GHLClient.from_session() as ghl:
+                return await ghl.search_locations()
+
+        try:
+            result = asyncio.run(_resolve())
+        except Exception as e:
+            console.print(f"[red]Error fetching locations: {e}[/red]")
+            raise typer.Exit(1)
+
+        locations = result.get("locations", [])
+        norm = name.strip().lower()
+        matches = [
+            loc
+            for loc in locations
+            if isinstance(loc, dict) and str(loc.get("name", "")).strip().lower() == norm
+        ]
+
+        if not matches:
+            console.print(f"[red]No location matched name: {name!r}[/red]")
+            raise typer.Exit(1)
+        if len(matches) > 1:
+            console.print(f"[red]Multiple locations matched name: {name!r}. Use --location-id.[/red]")
+            raise typer.Exit(1)
+
+        match = matches[0]
+        resolved = match.get("_id") or match.get("id")
+        if not isinstance(resolved, str) or not resolved:
+            console.print("[red]Could not resolve location id from API response.[/red]")
+            raise typer.Exit(1)
+        location_id = resolved
+
+    if not isinstance(location_id, str) or not location_id.strip():
+        console.print("[red]Invalid location_id[/red]")
+        raise typer.Exit(1)
+
+    data.session.location_id = location_id.strip()
+    manager.storage.save(data)
+
+    console.print(f"[green]Default location set:[/green] {data.session.location_id}")
 
 
 # OAuth sub-commands
@@ -855,9 +958,7 @@ def browser_token(
             # Navigate to GHL
             await agent.navigate("https://app.gohighlevel.com/")
 
-            # Check if logged in
-            if not await agent.is_logged_in():
-                return {"success": False, "error": "Not logged in. Run 'maxlevel browser capture' first."}
+            cookie_auth = await agent.extract_cookie_auth()
 
             # Wait a moment for API calls
             await asyncio.sleep(3)
@@ -865,6 +966,23 @@ def browser_token(
             # Extract tokens
             tokens = agent.get_auth_tokens()
             ghl_data = agent.network.get_ghl_specific() if agent.network else {}
+
+            # Merge cookie token/ids (often the only reliable signal)
+            if cookie_auth:
+                if cookie_auth.get("access_token") and not tokens.get("access_token"):
+                    tokens["access_token"] = cookie_auth["access_token"]
+                if cookie_auth.get("company_id"):
+                    tokens.setdefault("companyId", cookie_auth["company_id"])
+                if cookie_auth.get("user_id"):
+                    tokens.setdefault("userId", cookie_auth["user_id"])
+
+            if not tokens.get("access_token"):
+                if not await agent.is_logged_in():
+                    return {
+                        "success": False,
+                        "error": "Not logged in and no token found. Run 'maxlevel browser capture' or 'maxlevel auth quick' first.",
+                    }
+                return {"success": False, "error": "No token found. Try interacting with the app and retry."}
 
             return {
                 "success": True,

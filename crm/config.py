@@ -29,6 +29,13 @@ class CRMSettings(BaseSettings):
     sync_browser_profile: str = "ghl_session"
     sync_browser_headless: bool = False
     sync_browser_continue_on_error: bool = True
+    sync_browser_find_attempts: int = 3
+    sync_browser_step_retry_wait_seconds: float = 0.75
+    sync_browser_require_login: bool = True
+    sync_browser_preflight_url: str = "https://app.gohighlevel.com/"
+    sync_browser_login_email: str | None = None
+    sync_browser_login_password: str | None = None
+    sync_browser_login_timeout_seconds: int = 120
 
     model_config = {"env_prefix": "CRM_", "env_file": ".env", "extra": "ignore"}
 

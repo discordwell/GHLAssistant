@@ -125,6 +125,75 @@ def _target_ids(plan: dict[str, Any], domain: str) -> set[str]:
     return ids
 
 
+def _successful_item_ids(
+    plan: dict[str, Any],
+    execution: dict[str, Any],
+) -> dict[str, set[str]]:
+    by_domain: dict[str, set[str]] = {}
+
+    results = execution.get("results", [])
+    if isinstance(results, list) and results:
+        for result in results:
+            if not isinstance(result, dict) or not result.get("success"):
+                continue
+            domain = result.get("domain")
+            local_id = result.get("local_id")
+            if not isinstance(domain, str) or not isinstance(local_id, str) or not local_id:
+                continue
+            by_domain.setdefault(domain, set()).add(local_id)
+        return by_domain
+
+    items_total = int(execution.get("items_total", 0))
+    items_completed = int(execution.get("items_completed", 0))
+    if items_total > 0 and items_total == items_completed:
+        for item in plan.get("items", []):
+            if not isinstance(item, dict):
+                continue
+            domain = item.get("domain")
+            local_id = item.get("local_id")
+            if not isinstance(domain, str) or not isinstance(local_id, str) or not local_id:
+                continue
+            by_domain.setdefault(domain, set()).add(local_id)
+
+    return by_domain
+
+
+def _candidate_find_queries(
+    params: dict[str, Any],
+    step: dict[str, Any] | None = None,
+) -> list[str]:
+    candidates: list[str] = []
+
+    query = params.get("query")
+    if isinstance(query, str) and query.strip():
+        candidates.append(query.strip())
+
+    if isinstance(step, dict):
+        description = step.get("description")
+        if isinstance(description, str) and description.strip():
+            desc = description.strip()
+            candidates.append(desc)
+            if ":" in desc:
+                _, suffix = desc.split(":", 1)
+                if suffix.strip():
+                    candidates.append(suffix.strip())
+
+        name = step.get("name")
+        if isinstance(name, str) and name.strip():
+            candidates.append(name.replace("_", " ").strip())
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        norm = _normalize_name(candidate)
+        if not norm or norm in seen:
+            continue
+        seen.add(norm)
+        deduped.append(candidate)
+
+    return deduped
+
+
 def _build_find_and_focus_js(query: str) -> str:
     query_json = json.dumps(query)
     return f"""
@@ -198,6 +267,28 @@ def _build_find_and_focus_js(query: str) -> str:
 """
 
 
+def _build_scroll_js(direction: str = "down", amount: int = 1) -> str:
+    direction_json = json.dumps(direction)
+    bounded_amount = max(1, min(int(amount), 10))
+    return f"""
+(() => {{
+  const direction = {direction_json}.toLowerCase();
+  const amount = {bounded_amount};
+  const delta = Math.max(150, Math.floor(window.innerHeight * 0.6)) * amount;
+  if (direction === "up") {{
+    window.scrollBy({{ top: -delta, left: 0, behavior: "auto" }});
+  }} else if (direction === "left") {{
+    window.scrollBy({{ top: 0, left: -delta, behavior: "auto" }});
+  }} else if (direction === "right") {{
+    window.scrollBy({{ top: 0, left: delta, behavior: "auto" }});
+  }} else {{
+    window.scrollBy({{ top: delta, left: 0, behavior: "auto" }});
+  }}
+  return {{ ok: true, direction, amount }};
+}})()
+"""
+
+
 def _build_type_active_js(text: str) -> str:
     text_json = json.dumps(text)
     return f"""
@@ -228,6 +319,36 @@ def _build_type_active_js(text: str) -> str:
   }}
 
   return {{ ok: false, reason: "active_not_typable", tag }};
+}})()
+"""
+
+
+def _build_set_active_value_js(value: str) -> str:
+    value_json = json.dumps(value)
+    return f"""
+(() => {{
+  const value = {value_json};
+  const active = document.activeElement;
+  if (!active) {{
+    return {{ ok: false, reason: "no_active_element" }};
+  }}
+
+  if (active.isContentEditable) {{
+    active.focus();
+    active.textContent = value;
+    return {{ ok: true, mode: "contenteditable" }};
+  }}
+
+  const tag = (active.tagName || "").toLowerCase();
+  if (tag === "input" || tag === "textarea" || tag === "select") {{
+    active.focus();
+    active.value = value;
+    active.dispatchEvent(new Event("input", {{ bubbles: true }}));
+    active.dispatchEvent(new Event("change", {{ bubbles: true }}));
+    return {{ ok: true, mode: tag }};
+  }}
+
+  return {{ ok: false, reason: "active_not_settable", tag }};
 }})()
 """
 
@@ -275,13 +396,50 @@ def _build_key_dispatch_js(key: str, repeat: int) -> str:
 """
 
 
+def _build_click_active_js(double: bool = False) -> str:
+    if double:
+        return """
+(() => {
+  const a = document.activeElement;
+  if (!a) return { ok: false, reason: "no_active_element" };
+  try {
+    a.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    if (typeof a.click === "function") a.click();
+    return { ok: true, mode: "double_click" };
+  } catch (e) {
+    return { ok: false, reason: String(e) };
+  }
+})()
+"""
+    return """
+(() => {
+  const a = document.activeElement;
+  if (!a) return { ok: false, reason: "no_active_element" };
+  try {
+    if (typeof a.click === "function") a.click();
+    return { ok: true, mode: "left_click" };
+  } catch (e) {
+    return { ok: false, reason: String(e) };
+  }
+})()
+"""
+
+
 def _get_browser_agent_cls():
     from maxlevel.browser.agent import BrowserAgent
 
     return BrowserAgent
 
 
-async def _execute_step_command(agent: Any, step_name: str, command: dict[str, Any]) -> dict[str, Any]:
+async def _execute_step_command(
+    agent: Any,
+    step_name: str,
+    command: dict[str, Any],
+    *,
+    step: dict[str, Any] | None = None,
+    max_find_attempts: int = 3,
+    retry_wait_seconds: float = 0.75,
+) -> dict[str, Any]:
     if not isinstance(command, dict):
         return {"success": False, "error": "Invalid command payload"}
 
@@ -289,6 +447,9 @@ async def _execute_step_command(agent: Any, step_name: str, command: dict[str, A
     params = command.get("params", {})
     if not isinstance(params, dict):
         params = {}
+
+    find_attempts = max(1, int(max_find_attempts))
+    wait_between_attempts = _parse_wait(retry_wait_seconds)
 
     try:
         if tool == "mcp__claude-in-chrome__navigate":
@@ -299,16 +460,37 @@ async def _execute_step_command(agent: Any, step_name: str, command: dict[str, A
             return {"success": True, "data": state}
 
         if tool == "mcp__claude-in-chrome__find":
-            query = params.get("query")
-            if not isinstance(query, str) or not query.strip():
+            queries = _candidate_find_queries(params, step=step)
+            if not queries:
                 return {"success": False, "error": "Find step missing query"}
-            found = await agent.evaluate(_build_find_and_focus_js(query))
-            if isinstance(found, dict) and found.get("found"):
-                return {"success": True, "data": found}
+
+            attempted_queries: list[str] = []
+            last_response: Any = None
+            for attempt in range(find_attempts):
+                for query in queries:
+                    attempted_queries.append(query)
+                    found = await agent.evaluate(_build_find_and_focus_js(query))
+                    last_response = found
+                    if isinstance(found, dict) and found.get("found"):
+                        return {
+                            "success": True,
+                            "data": found,
+                            "attempt": attempt + 1,
+                            "query": query,
+                        }
+
+                if attempt < find_attempts - 1:
+                    try:
+                        await agent.evaluate(_build_scroll_js("down", amount=1))
+                    except Exception:
+                        pass
+                    if wait_between_attempts > 0:
+                        await asyncio.sleep(wait_between_attempts)
+
             return {
                 "success": False,
-                "error": f"Element not found for query '{query}'",
-                "data": found,
+                "error": f"Element not found for queries: {attempted_queries}",
+                "data": last_response,
             }
 
         if tool == "mcp__claude-in-chrome__javascript_tool":
@@ -317,6 +499,14 @@ async def _execute_step_command(agent: Any, step_name: str, command: dict[str, A
                 return {"success": False, "error": "JS step missing code"}
             js_result = await agent.evaluate(code)
             return {"success": True, "data": js_result}
+
+        if tool == "mcp__claude-in-chrome__form_input":
+            value = params.get("value")
+            set_value = await agent.evaluate(_build_set_active_value_js(str(value)))
+            ok = isinstance(set_value, dict) and bool(set_value.get("ok"))
+            if not ok:
+                return {"success": False, "error": "Unable to set active element value", "data": set_value}
+            return {"success": True, "data": set_value}
 
         if tool == "mcp__claude-in-chrome__computer":
             action = str(params.get("action", "")).lower()
@@ -349,14 +539,34 @@ async def _execute_step_command(agent: Any, step_name: str, command: dict[str, A
                 return {"success": True, "data": dispatched}
 
             if action == "left_click":
-                clicked = await agent.evaluate(
-                    "(() => { const a = document.activeElement; "
-                    "if (!a || typeof a.click !== 'function') return {ok:false}; a.click(); return {ok:true}; })()"
-                )
+                clicked = await agent.evaluate(_build_click_active_js(double=False))
                 ok = isinstance(clicked, dict) and bool(clicked.get("ok"))
                 if not ok:
                     return {"success": False, "error": "Unable to click active element", "data": clicked}
                 return {"success": True, "data": clicked}
+
+            if action == "double_click":
+                clicked = await agent.evaluate(_build_click_active_js(double=True))
+                ok = isinstance(clicked, dict) and bool(clicked.get("ok"))
+                if not ok:
+                    return {"success": False, "error": "Unable to double-click active element", "data": clicked}
+                return {"success": True, "data": clicked}
+
+            if action == "scroll":
+                direction = str(params.get("scroll_direction", "down"))
+                amount = _parse_repeat(params.get("scroll_amount", 1))
+                scrolled = await agent.evaluate(_build_scroll_js(direction=direction, amount=amount))
+                return {"success": True, "data": scrolled}
+
+            if action == "scroll_to":
+                scrolled = await agent.evaluate(
+                    "(() => { const a = document.activeElement; if (!a) return {ok:false}; "
+                    "a.scrollIntoView({behavior:'auto',block:'center'}); return {ok:true}; })()"
+                )
+                ok = isinstance(scrolled, dict) and bool(scrolled.get("ok"))
+                if not ok:
+                    return {"success": False, "error": "Unable to scroll active element into view", "data": scrolled}
+                return {"success": True, "data": scrolled}
 
             return {"success": False, "error": f"Unsupported computer action '{action}'"}
 
@@ -547,6 +757,13 @@ async def execute_browser_export_plan(
     profile_name: str = "ghl_session",
     headless: bool = False,
     continue_on_error: bool = True,
+    max_find_attempts: int = 3,
+    retry_wait_seconds: float = 0.75,
+    require_login: bool = True,
+    preflight_url: str = "https://app.gohighlevel.com/",
+    login_email: str | None = None,
+    login_password: str | None = None,
+    login_timeout_seconds: int = 120,
 ) -> dict[str, Any]:
     """Execute a browser export plan with a persistent browser profile."""
     items = plan.get("items", [])
@@ -558,6 +775,12 @@ async def execute_browser_export_plan(
         "profile_name": profile_name,
         "headless": headless,
         "continue_on_error": continue_on_error,
+        "max_find_attempts": max_find_attempts,
+        "retry_wait_seconds": retry_wait_seconds,
+        "require_login": require_login,
+        "preflight_url": preflight_url,
+        "login_configured": bool(login_email and login_password),
+        "login_timeout_seconds": login_timeout_seconds,
         "items_total": len(items),
         "items_completed": 0,
         "steps_total": sum(len(item.get("steps", [])) for item in items if isinstance(item, dict)),
@@ -576,6 +799,68 @@ async def execute_browser_export_plan(
         headless=headless,
         capture_network=False,
     ) as agent:
+        if require_login:
+            try:
+                state = await agent.navigate(preflight_url)
+            except Exception as exc:
+                summary["success"] = False
+                summary["aborted"] = True
+                summary["errors"].append(f"Browser preflight navigation failed: {exc}")
+                return summary
+
+            logged_in = True
+            login_checker = getattr(agent, "is_logged_in", None)
+            if callable(login_checker):
+                try:
+                    logged_in = bool(await login_checker())
+                except Exception:
+                    logged_in = True
+
+            summary["preflight"] = {"state": state, "logged_in": logged_in}
+
+            if not logged_in:
+                login_fn = getattr(agent, "login_ghl", None)
+                if login_email and login_password and callable(login_fn):
+                    try:
+                        login_result = await login_fn(
+                            login_email,
+                            login_password,
+                            timeout_seconds=int(login_timeout_seconds),
+                            url=preflight_url,
+                        )
+                    except TypeError:
+                        # Backwards compatibility if signature differs.
+                        login_result = await login_fn(login_email, login_password)
+                    except Exception as exc:
+                        login_result = {"success": False, "error": str(exc)}
+
+                    summary["preflight"]["login_attempted"] = True
+                    summary["preflight"]["login_result"] = (
+                        login_result if isinstance(login_result, dict) else {"success": False}
+                    )
+
+                    # Re-check login after attempt.
+                    if callable(login_checker):
+                        try:
+                            logged_in = bool(await login_checker())
+                        except Exception:
+                            logged_in = True
+                    else:
+                        logged_in = True
+                    summary["preflight"]["logged_in"] = logged_in
+
+            if not logged_in:
+                summary["success"] = False
+                summary["aborted"] = True
+                summary["errors"].append("Browser preflight failed: not logged in to GHL profile")
+                try:
+                    summary["preflight"]["screenshot"] = await agent.screenshot(
+                        _safe_name("browser_preflight_not_logged_in")
+                    )
+                except Exception:
+                    pass
+                return summary
+
         for item in items:
             if not isinstance(item, dict):
                 continue
@@ -595,6 +880,7 @@ async def execute_browser_export_plan(
                 "steps_completed": 0,
                 "errors": [],
                 "success": True,
+                "step_results": [],
             }
 
             for index, step in enumerate(steps):
@@ -609,7 +895,18 @@ async def execute_browser_export_plan(
                     agent,
                     step_name=f"{item_label}_{step_name}",
                     command=command if isinstance(command, dict) else {},
+                    step=step,
+                    max_find_attempts=max_find_attempts,
+                    retry_wait_seconds=retry_wait_seconds,
                 )
+
+                step_result = {
+                    "name": step_name,
+                    "required": required,
+                    "success": bool(exec_result.get("success")),
+                }
+                if exec_result.get("data") is not None:
+                    step_result["data"] = exec_result.get("data")
 
                 if exec_result.get("success"):
                     item_result["steps_completed"] += 1
@@ -621,19 +918,39 @@ async def execute_browser_export_plan(
 
                     if bool(step.get("screenshot_after", False)):
                         try:
-                            await agent.screenshot(_safe_name(f"{item_label}_{step_name}_after"))
+                            screenshot_path = await agent.screenshot(
+                                _safe_name(f"{item_label}_{step_name}_after")
+                            )
+                            step_result["post_screenshot"] = screenshot_path
                         except Exception as exc:
                             screenshot_error = (
                                 f"{item_label}:{step_name}: screenshot_after failed: {exc}"
                             )
                             item_result["errors"].append(screenshot_error)
                             summary["errors"].append(screenshot_error)
+                            step_result["warning"] = screenshot_error
+                    item_result["step_results"].append(step_result)
                     continue
 
                 error = str(exec_result.get("error", "Unknown execution error"))
                 failure = f"{item_label}:{step_name}: {error}"
                 item_result["errors"].append(failure)
                 summary["errors"].append(failure)
+                step_result["error"] = error
+
+                try:
+                    failure_screenshot = await agent.screenshot(
+                        _safe_name(f"{item_label}_{step_name}_failure")
+                    )
+                    step_result["failure_screenshot"] = failure_screenshot
+                except Exception as exc:
+                    screenshot_error = (
+                        f"{item_label}:{step_name}: failure screenshot error: {exc}"
+                    )
+                    item_result["errors"].append(screenshot_error)
+                    summary["errors"].append(screenshot_error)
+
+                item_result["step_results"].append(step_result)
 
                 if required:
                     item_result["success"] = False
@@ -660,6 +977,7 @@ async def reconcile_browser_export_ids(
     location: Location,
     ghl: Any,
     plan: dict[str, Any],
+    successful_ids_by_domain: dict[str, set[str]] | None = None,
 ) -> SyncResult:
     """Reconcile locally-created records with remote IDs after UI export."""
     result = SyncResult()
@@ -671,6 +989,8 @@ async def reconcile_browser_export_ids(
     now = datetime.now(timezone.utc)
 
     form_ids = _target_ids(plan, "forms")
+    if successful_ids_by_domain is not None:
+        form_ids &= successful_ids_by_domain.get("forms", set())
     if form_ids:
         forms = list(
             (
@@ -753,6 +1073,8 @@ async def reconcile_browser_export_ids(
                     result.updated += 1
 
     survey_ids = _target_ids(plan, "surveys")
+    if successful_ids_by_domain is not None:
+        survey_ids &= successful_ids_by_domain.get("surveys", set())
     if survey_ids:
         surveys = list(
             (
@@ -837,6 +1159,8 @@ async def reconcile_browser_export_ids(
                     result.updated += 1
 
     campaign_ids = _target_ids(plan, "campaigns")
+    if successful_ids_by_domain is not None:
+        campaign_ids &= successful_ids_by_domain.get("campaigns", set())
     if campaign_ids:
         campaigns = list(
             (
@@ -873,6 +1197,8 @@ async def reconcile_browser_export_ids(
                 result.updated += 1
 
     funnel_ids = _target_ids(plan, "funnels")
+    if successful_ids_by_domain is not None:
+        funnel_ids &= successful_ids_by_domain.get("funnels", set())
     if funnel_ids:
         funnels = list(
             (
@@ -962,6 +1288,13 @@ async def export_browser_backed_resources(
     profile_name: str = "ghl_session",
     headless: bool = False,
     continue_on_error: bool = True,
+    max_find_attempts: int = 3,
+    retry_wait_seconds: float = 0.75,
+    require_login: bool = True,
+    preflight_url: str = "https://app.gohighlevel.com/",
+    login_email: str | None = None,
+    login_password: str | None = None,
+    login_timeout_seconds: int = 120,
     ghl: Any | None = None,
 ) -> SyncResult:
     """Generate/execute browser fallback steps for unsupported resources."""
@@ -992,6 +1325,13 @@ async def export_browser_backed_resources(
         profile_name=profile_name,
         headless=headless,
         continue_on_error=continue_on_error,
+        max_find_attempts=max_find_attempts,
+        retry_wait_seconds=retry_wait_seconds,
+        require_login=require_login,
+        preflight_url=preflight_url,
+        login_email=login_email,
+        login_password=login_password,
+        login_timeout_seconds=login_timeout_seconds,
     )
     execution_path = write_sync_archive(archive_key, "browser_export_execution", execution)
     items_total = int(execution.get("items_total", len(items)))
@@ -1019,7 +1359,20 @@ async def export_browser_backed_resources(
         result.errors.append("WARN: Browser fallback ID reconciliation skipped (no GHL client)")
         return result
 
-    reconcile_result = await reconcile_browser_export_ids(db, location, ghl, plan)
+    successful_ids = _successful_item_ids(plan, execution)
+    if not any(successful_ids.values()):
+        result.errors.append(
+            "WARN: Browser fallback reconciliation skipped (no successfully executed resources)"
+        )
+        return result
+
+    reconcile_result = await reconcile_browser_export_ids(
+        db,
+        location,
+        ghl,
+        plan,
+        successful_ids_by_domain=successful_ids,
+    )
     result.updated += reconcile_result.updated
     result.errors.extend(reconcile_result.errors)
 

@@ -61,22 +61,30 @@ class ContactsAPI:
         offset: int = 0,
         query: str | None = None,
         location_id: str | None = None,
+        start_after_id: str | None = None,
+        start_after: int | None = None,
     ) -> dict[str, Any]:
         """List contacts for location.
 
         Args:
             limit: Max contacts to return (default 20, max 100)
-            offset: Pagination offset
+            offset: Pagination offset (deprecated for this endpoint; ignored)
             query: Search query (searches name, email, phone)
             location_id: Override default location
+            start_after_id: Cursor id for pagination (from response meta.startAfterId)
+            start_after: Cursor timestamp for pagination (from response meta.startAfter)
 
         Returns:
             {"contacts": [...], "meta": {"total": N, ...}}
         """
         lid = location_id or self._location_id
-        params = {"locationId": lid, "limit": min(limit, 100), "offset": max(offset, 0)}
+        params: dict[str, Any] = {"locationId": lid, "limit": min(limit, 100)}
         if query:
             params["query"] = query
+        if start_after_id:
+            params["startAfterId"] = start_after_id
+        if start_after is not None:
+            params["startAfter"] = start_after
         return await self._client._get("/contacts/", **params)
 
     async def get(self, contact_id: str) -> dict[str, Any]:

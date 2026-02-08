@@ -1,0 +1,44 @@
+{
+  "contacts": [
+    {
+      "id": "Okn3UqFwjcI0rA3z8LQU",
+      "locationId": "NHopECHazoaDq2Cf2wOy",
+      "contactName": "synctest delay",
+      "firstName": "synctest",
+      "lastName": "delay",
+      "firstNameRaw": "SyncTest",
+      "lastNameRaw": "Delay",
+      "companyName": null,
+      "email": "synctest-delay-45mhr0k0@example.com",
+      "phone": null,
+      "dnd": false,
+      "dndSettings": {},
+      "type": "lead",
+      "source": "api",
+      "assignedTo": null,
+      "city": null,
+      "state": null,
+      "postalCode": null,
+      "address1": null,
+      "dateAdded": "2026-02-08T01:41:14.045Z",
+      "dateUpdated": "2026-02-08T01:41:14.045Z",
+      "dateOfBirth": null,
+      "businessId": null,
+      "tags": [],
+      "followers": [],
+      "country": "US",
+      "website": null,
+      "timezone": null,
+      "profilePhoto": null,
+      "additionalEmails": [],
+      "linkedInLeadId": null,
+      "facebookLeadId": null,
+      "clientPortalId": null,
+      "customFields": [],
+      "startAfter": [
+        1770514874045,
+        "Okn3UqFwjcI0rA3z8LQU"
+      ]
+    }
+  ]
+}

@@ -24,7 +24,7 @@ class DummyClient:
 
 
 @pytest.mark.asyncio
-async def test_contacts_list_supports_offset():
+async def test_contacts_list_ignores_offset_and_supports_start_after_cursor():
     client = DummyClient()
     api = ContactsAPI(client)
 
@@ -34,7 +34,13 @@ async def test_contacts_list_supports_offset():
     assert endpoint == "/contacts/"
     assert params["locationId"] == "loc_test"
     assert params["limit"] == 100
-    assert params["offset"] == 40
+    assert "offset" not in params
+
+    await api.list(limit=5, start_after_id="contact_123", start_after=1770514874045)
+    endpoint, params = client.calls[-1]
+    assert endpoint == "/contacts/"
+    assert params["startAfterId"] == "contact_123"
+    assert params["startAfter"] == 1770514874045
 
 
 @pytest.mark.asyncio

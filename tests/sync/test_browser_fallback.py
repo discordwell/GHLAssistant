@@ -151,6 +151,9 @@ class FakeBrowserAgent:
         self.calls.append(("screenshot", name or ""))
         return f"/tmp/{name or 'screenshot'}.png"
 
+    async def is_logged_in(self):
+        return True
+
 
 @pytest.mark.asyncio
 async def test_execute_browser_export_plan_dispatches_supported_commands(monkeypatch):
@@ -247,6 +250,195 @@ async def test_execute_browser_export_plan_dispatches_supported_commands(monkeyp
     assert "screenshot" in call_names
 
 
+class RetryFindBrowserAgent(FakeBrowserAgent):
+    def __init__(self, profile_name: str, headless: bool, capture_network: bool):
+        super().__init__(profile_name, headless, capture_network)
+        self.find_attempts = 0
+
+    async def evaluate(self, js: str):
+        self.calls.append(("evaluate", js))
+        if "empty_query" in js and "no_match" in js:
+            self.find_attempts += 1
+            if self.find_attempts < 2:
+                return {"found": False}
+            return {"found": True}
+        return {"ok": True}
+
+
+class LoggedOutBrowserAgent(FakeBrowserAgent):
+    async def is_logged_in(self):
+        return False
+
+
+class AutoLoginBrowserAgent(FakeBrowserAgent):
+    def __init__(self, profile_name: str, headless: bool, capture_network: bool):
+        super().__init__(profile_name, headless, capture_network)
+        self._logged_in = False
+        self.login_calls: list[tuple[str, int]] = []
+
+    async def is_logged_in(self):
+        return self._logged_in
+
+    async def login_ghl(self, email: str, password: str, timeout_seconds: int = 120, url: str = ""):
+        # Do not store password; just assert we were invoked.
+        self.login_calls.append((email, timeout_seconds))
+        self._logged_in = True
+        return {"success": True}
+
+
+@pytest.mark.asyncio
+async def test_execute_browser_export_plan_retries_find(monkeypatch):
+    monkeypatch.setattr(
+        "crm.sync.browser_fallback._get_browser_agent_cls",
+        lambda: RetryFindBrowserAgent,
+    )
+
+    plan = {
+        "items": [
+            {
+                "domain": "forms",
+                "name": "Lead Form",
+                "local_id": "local_form_1",
+                "steps": [
+                    {
+                        "name": "find_button",
+                        "description": "Find create form button",
+                        "command": {
+                            "tool": "mcp__claude-in-chrome__find",
+                            "params": {"query": "create form button"},
+                        },
+                        "required": True,
+                        "wait_after": 0,
+                    }
+                ],
+            }
+        ]
+    }
+
+    summary = await execute_browser_export_plan(
+        plan,
+        profile_name="ghl_session",
+        headless=True,
+        continue_on_error=True,
+        max_find_attempts=3,
+        retry_wait_seconds=0,
+    )
+
+    assert summary["success"] is True
+    assert summary["steps_completed"] == 1
+    agent = RetryFindBrowserAgent.last_instance
+    assert agent is not None
+    assert agent.find_attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_execute_browser_export_plan_captures_failure_screenshot(monkeypatch):
+    monkeypatch.setattr(
+        "crm.sync.browser_fallback._get_browser_agent_cls",
+        lambda: FakeBrowserAgent,
+    )
+
+    plan = {
+        "items": [
+            {
+                "domain": "forms",
+                "name": "Lead Form",
+                "local_id": "local_form_1",
+                "steps": [
+                    {
+                        "name": "unsupported",
+                        "command": {
+                            "tool": "mcp__claude-in-chrome__computer",
+                            "params": {"action": "unknown"},
+                        },
+                        "required": True,
+                        "wait_after": 0,
+                    }
+                ],
+            }
+        ]
+    }
+
+    summary = await execute_browser_export_plan(
+        plan,
+        profile_name="ghl_session",
+        headless=True,
+        continue_on_error=True,
+    )
+
+    assert summary["success"] is False
+    assert summary["items_completed"] == 0
+    assert summary["results"][0]["step_results"][0]["failure_screenshot"].startswith("/tmp/")
+
+
+@pytest.mark.asyncio
+async def test_execute_browser_export_plan_aborts_when_not_logged_in(monkeypatch):
+    monkeypatch.setattr(
+        "crm.sync.browser_fallback._get_browser_agent_cls",
+        lambda: LoggedOutBrowserAgent,
+    )
+
+    plan = {
+        "items": [
+            {
+                "domain": "forms",
+                "name": "Lead Form",
+                "local_id": "local_form_1",
+                "steps": [],
+            }
+        ]
+    }
+
+    summary = await execute_browser_export_plan(
+        plan,
+        profile_name="ghl_session",
+        headless=True,
+        continue_on_error=True,
+        require_login=True,
+    )
+
+    assert summary["success"] is False
+    assert summary["aborted"] is True
+    assert summary["preflight"]["logged_in"] is False
+    assert any("not logged in" in msg.lower() for msg in summary["errors"])
+
+
+@pytest.mark.asyncio
+async def test_execute_browser_export_plan_attempts_auto_login(monkeypatch):
+    monkeypatch.setattr(
+        "crm.sync.browser_fallback._get_browser_agent_cls",
+        lambda: AutoLoginBrowserAgent,
+    )
+
+    plan = {
+        "items": [
+            {
+                "domain": "forms",
+                "name": "Lead Form",
+                "local_id": "local_form_1",
+                "steps": [],
+            }
+        ]
+    }
+
+    summary = await execute_browser_export_plan(
+        plan,
+        profile_name="ghl_session",
+        headless=True,
+        continue_on_error=True,
+        require_login=True,
+        login_email="user@example.com",
+        login_password="secret",
+        login_timeout_seconds=5,
+    )
+
+    assert summary["success"] is True
+    assert summary["items_completed"] == 1
+    assert summary.get("preflight", {}).get("logged_in") is True
+    agent = AutoLoginBrowserAgent.last_instance
+    assert agent is not None
+    assert agent.login_calls == [("user@example.com", 5)]
+
 class FakeFormsAPI:
     async def list(self, location_id: str | None = None):
         return {"forms": [{"id": "ghl_form_remote", "name": "Lead Form"}]}
@@ -340,7 +532,19 @@ async def test_export_browser_backed_resources_execute_mode_aggregates_results(
         archived_domains.append(domain)
         return Path(f"/tmp/{domain}.json")
 
-    async def fake_execute(plan, profile_name, headless, continue_on_error):
+    async def fake_execute(
+        plan,
+        profile_name,
+        headless,
+        continue_on_error,
+        max_find_attempts,
+        retry_wait_seconds,
+        require_login,
+        preflight_url,
+        login_email,
+        login_password,
+        login_timeout_seconds,
+    ):
         return {
             "success": True,
             "items_total": len(plan.get("items", [])),
@@ -348,7 +552,7 @@ async def test_export_browser_backed_resources_execute_mode_aggregates_results(
             "errors": [],
         }
 
-    async def fake_reconcile(db, location, ghl, plan):
+    async def fake_reconcile(db, location, ghl, plan, successful_ids_by_domain=None):
         return SyncResult(updated=3)
 
     monkeypatch.setattr("crm.sync.browser_fallback.write_sync_archive", fake_archive)
@@ -372,3 +576,51 @@ async def test_export_browser_backed_resources_execute_mode_aggregates_results(
     assert "browser_export_plan" in archived_domains
     assert "browser_export_execution" in archived_domains
     assert "browser_export_reconciliation" in archived_domains
+
+
+@pytest.mark.asyncio
+async def test_export_browser_backed_resources_skips_reconcile_without_successful_items(
+    db: AsyncSession, location: Location, monkeypatch
+):
+    async def fake_execute(
+        plan,
+        profile_name,
+        headless,
+        continue_on_error,
+        max_find_attempts,
+        retry_wait_seconds,
+        require_login,
+        preflight_url,
+        login_email,
+        login_password,
+        login_timeout_seconds,
+    ):
+        return {
+            "success": False,
+            "items_total": len(plan.get("items", [])),
+            "items_completed": 0,
+            "results": [],
+            "errors": ["failed"],
+        }
+
+    async def fake_reconcile(db, location, ghl, plan, successful_ids_by_domain=None):
+        raise AssertionError("reconcile should not be called when no items succeeded")
+
+    monkeypatch.setattr("crm.sync.browser_fallback.execute_browser_export_plan", fake_execute)
+    monkeypatch.setattr("crm.sync.browser_fallback.reconcile_browser_export_ids", fake_reconcile)
+
+    result = await export_browser_backed_resources(
+        db,
+        location,
+        tab_id=12345,
+        execute=True,
+        profile_name="ghl_session",
+        headless=False,
+        continue_on_error=True,
+        ghl=object(),
+    )
+
+    assert result.created == 0
+    assert result.updated == 0
+    assert result.skipped == 4
+    assert any("reconciliation skipped" in msg.lower() for msg in result.errors)

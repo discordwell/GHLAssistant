@@ -101,6 +101,60 @@ async def _paginate_offset(
     return all_items
 
 
+async def _paginate_start_after(
+    fetch_page,
+    key: str,
+    page_size: int = 100,
+    max_pages: int = 2000,
+) -> list[dict]:
+    """Paginate endpoints that use startAfter/startAfterId cursors (e.g. contacts)."""
+    all_items: list[dict] = []
+    seen_ids: set[str] = set()
+
+    start_after_id: str | None = None
+    start_after: int | None = None
+
+    for _ in range(max_pages):
+        resp = await fetch_page(page_size, start_after_id, start_after)
+        batch = _extract_items(resp, key)
+        if not batch:
+            break
+
+        new_count = 0
+        for item in batch:
+            item_id = item.get("id", item.get("_id", ""))
+            if item_id:
+                if item_id in seen_ids:
+                    continue
+                seen_ids.add(item_id)
+            all_items.append(item)
+            new_count += 1
+
+        # Defensive guard when the API returns the same cursor page repeatedly.
+        if new_count == 0:
+            break
+
+        meta = resp.get("meta", {})
+        if not isinstance(meta, dict):
+            break
+
+        next_start_after_id = meta.get("startAfterId")
+        next_start_after = meta.get("startAfter")
+
+        if not isinstance(next_start_after_id, str) or not next_start_after_id:
+            break
+        if not isinstance(next_start_after, int):
+            break
+
+        if next_start_after_id == start_after_id and next_start_after == start_after:
+            break
+
+        start_after_id = next_start_after_id
+        start_after = next_start_after
+
+    return all_items
+
+
 async def _paginate_page(
     fetch_page,
     key: str,
@@ -288,9 +342,12 @@ async def run_import(db: AsyncSession, location: Location) -> SyncResult:
 
         # 6. Contacts (paginated)
         try:
-            all_contacts = await _paginate_offset(
-                lambda limit, offset: ghl.contacts.list(
-                    location_id=lid, limit=limit, offset=offset
+            all_contacts = await _paginate_start_after(
+                lambda limit, start_after_id, start_after: ghl.contacts.list(
+                    location_id=lid,
+                    limit=limit,
+                    start_after_id=start_after_id,
+                    start_after=start_after,
                 ),
                 key="contacts",
                 page_size=100,
@@ -625,6 +682,13 @@ async def run_export(db: AsyncSession, location: Location) -> SyncResult:
                 profile_name=settings.sync_browser_profile,
                 headless=settings.sync_browser_headless,
                 continue_on_error=settings.sync_browser_continue_on_error,
+                max_find_attempts=settings.sync_browser_find_attempts,
+                retry_wait_seconds=settings.sync_browser_step_retry_wait_seconds,
+                require_login=settings.sync_browser_require_login,
+                preflight_url=settings.sync_browser_preflight_url,
+                login_email=settings.sync_browser_login_email,
+                login_password=settings.sync_browser_login_password,
+                login_timeout_seconds=settings.sync_browser_login_timeout_seconds,
                 ghl=ghl,
             )
             total.created += r.created

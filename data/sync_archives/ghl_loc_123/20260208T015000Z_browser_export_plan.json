@@ -1,0 +1,777 @@
+{
+  "generated_at": "2026-02-08T01:50:00.176435+00:00",
+  "tab_id": 12345,
+  "location": {
+    "id": "2492c1de-d7e4-42f2-bfcd-597fab09c593",
+    "slug": "test-location",
+    "name": "Test Location",
+    "ghl_location_id": "ghl_loc_123"
+  },
+  "summary": {
+    "forms": 1,
+    "surveys": 1,
+    "campaigns": 1,
+    "funnels": 1
+  },
+  "items": [
+    {
+      "domain": "forms",
+      "action": "create_form_with_fields",
+      "local_id": "29a9d944-721b-4eba-9af9-8309f6ee3f93",
+      "name": "Lead Form",
+      "steps": [
+        {
+          "name": "navigate_forms",
+          "description": "Navigate to forms page",
+          "command": {
+            "tool": "mcp__claude-in-chrome__navigate",
+            "params": {
+              "url": "https://app.gohighlevel.com/sites/forms",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 2.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "find_create_form",
+          "description": "Find create/new form button",
+          "command": {
+            "tool": "mcp__claude-in-chrome__find",
+            "params": {
+              "query": "create form button or new form",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "wait_form_editor",
+          "description": "Wait for form editor to load",
+          "command": {
+            "tool": "mcp__claude-in-chrome__computer",
+            "params": {
+              "action": "wait",
+              "duration": 1.5,
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "find_form_name",
+          "description": "Find form name input",
+          "command": {
+            "tool": "mcp__claude-in-chrome__find",
+            "params": {
+              "query": "form name input",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "enter_form_name",
+          "description": "Enter form name: Lead Form",
+          "command": {
+            "tool": "mcp__claude-in-chrome__computer",
+            "params": {
+              "action": "type",
+              "text": "Lead Form",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "save_form",
+          "description": "Save form",
+          "command": {
+            "tool": "mcp__claude-in-chrome__find",
+            "params": {
+              "query": "save form button",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 1.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "verify_form_saved",
+          "description": "Capture saved form state",
+          "command": {
+            "tool": "mcp__claude-in-chrome__computer",
+            "params": {
+              "action": "screenshot",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "open_form_for_field_add",
+          "description": "Open form editor for: Lead Form",
+          "command": {
+            "tool": "mcp__claude-in-chrome__find",
+            "params": {
+              "query": "form named Lead Form",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 1.2,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "find_add_field_button",
+          "description": "Find add field button",
+          "command": {
+            "tool": "mcp__claude-in-chrome__find",
+            "params": {
+              "query": "add field button",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "choose_field_type",
+          "description": "Choose field type: email",
+          "command": {
+            "tool": "mcp__claude-in-chrome__find",
+            "params": {
+              "query": "field type email",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.8,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "set_field_label",
+          "description": "Set field label: Email",
+          "command": {
+            "tool": "mcp__claude-in-chrome__computer",
+            "params": {
+              "action": "type",
+              "text": "Email",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "save_field",
+          "description": "Save field changes",
+          "command": {
+            "tool": "mcp__claude-in-chrome__find",
+            "params": {
+              "query": "save field button",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.8,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "verify_field_saved",
+          "description": "Capture field after save",
+          "command": {
+            "tool": "mcp__claude-in-chrome__computer",
+            "params": {
+              "action": "screenshot",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        }
+      ]
+    },
+    {
+      "domain": "surveys",
+      "action": "create_survey_with_questions",
+      "local_id": "439e1454-bf42-46b8-bf7f-66d32fb95867",
+      "name": "CSAT",
+      "steps": [
+        {
+          "name": "navigate_surveys",
+          "description": "Navigate to surveys page",
+          "command": {
+            "tool": "mcp__claude-in-chrome__navigate",
+            "params": {
+              "url": "https://app.gohighlevel.com/sites/surveys",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 2.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "find_create_survey",
+          "description": "Find create/new survey button",
+          "command": {
+            "tool": "mcp__claude-in-chrome__find",
+            "params": {
+              "query": "create survey button or new survey",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "wait_survey_editor",
+          "description": "Wait for survey editor",
+          "command": {
+            "tool": "mcp__claude-in-chrome__computer",
+            "params": {
+              "action": "wait",
+              "duration": 1.5,
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "set_survey_name",
+          "description": "Set survey name: CSAT",
+          "command": {
+            "tool": "mcp__claude-in-chrome__computer",
+            "params": {
+              "action": "type",
+              "text": "CSAT",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "save_survey",
+          "description": "Save survey",
+          "command": {
+            "tool": "mcp__claude-in-chrome__find",
+            "params": {
+              "query": "save survey button",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 1.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "verify_survey_saved",
+          "description": "Capture saved survey",
+          "command": {
+            "tool": "mcp__claude-in-chrome__computer",
+            "params": {
+              "action": "screenshot",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "open_survey_for_question_add",
+          "description": "Open survey editor for: CSAT",
+          "command": {
+            "tool": "mcp__claude-in-chrome__find",
+            "params": {
+              "query": "survey named CSAT",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 1.2,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "find_add_question",
+          "description": "Find add question button",
+          "command": {
+            "tool": "mcp__claude-in-chrome__find",
+            "params": {
+              "query": "add question button",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "choose_question_type",
+          "description": "Choose question type: rating",
+          "command": {
+            "tool": "mcp__claude-in-chrome__find",
+            "params": {
+              "query": "question type rating",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "set_question_text",
+          "description": "Set question text: How was it?",
+          "command": {
+            "tool": "mcp__claude-in-chrome__computer",
+            "params": {
+              "action": "type",
+              "text": "How was it?",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "save_question",
+          "description": "Save survey question",
+          "command": {
+            "tool": "mcp__claude-in-chrome__find",
+            "params": {
+              "query": "save question button",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.8,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "verify_question_saved",
+          "description": "Capture saved survey question",
+          "command": {
+            "tool": "mcp__claude-in-chrome__computer",
+            "params": {
+              "action": "screenshot",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        }
+      ]
+    },
+    {
+      "domain": "campaigns",
+      "action": "create_campaign_with_steps",
+      "local_id": "7fc30843-5e9c-40c9-8335-ba062ccf77b9",
+      "name": "Welcome",
+      "steps": [
+        {
+          "name": "navigate_campaigns",
+          "description": "Navigate to campaigns page",
+          "command": {
+            "tool": "mcp__claude-in-chrome__navigate",
+            "params": {
+              "url": "https://app.gohighlevel.com/marketing/campaigns",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 2.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "find_create_campaign",
+          "description": "Find create/new campaign button",
+          "command": {
+            "tool": "mcp__claude-in-chrome__find",
+            "params": {
+              "query": "create campaign button or new campaign",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "wait_campaign_editor",
+          "description": "Wait for campaign editor",
+          "command": {
+            "tool": "mcp__claude-in-chrome__computer",
+            "params": {
+              "action": "wait",
+              "duration": 1.5,
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "set_campaign_name",
+          "description": "Set campaign name: Welcome",
+          "command": {
+            "tool": "mcp__claude-in-chrome__computer",
+            "params": {
+              "action": "type",
+              "text": "Welcome",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "set_campaign_status",
+          "description": "Set campaign status: draft",
+          "command": {
+            "tool": "mcp__claude-in-chrome__find",
+            "params": {
+              "query": "status option draft",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "save_campaign",
+          "description": "Save campaign",
+          "command": {
+            "tool": "mcp__claude-in-chrome__find",
+            "params": {
+              "query": "save campaign button",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 1.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "verify_campaign_saved",
+          "description": "Capture saved campaign",
+          "command": {
+            "tool": "mcp__claude-in-chrome__computer",
+            "params": {
+              "action": "screenshot",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "open_campaign_for_step_add",
+          "description": "Open campaign editor for: Welcome",
+          "command": {
+            "tool": "mcp__claude-in-chrome__find",
+            "params": {
+              "query": "campaign named Welcome",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 1.2,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "find_add_campaign_step",
+          "description": "Find add step button",
+          "command": {
+            "tool": "mcp__claude-in-chrome__find",
+            "params": {
+              "query": "add campaign step button",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "choose_campaign_step_type",
+          "description": "Choose campaign step type: email",
+          "command": {
+            "tool": "mcp__claude-in-chrome__find",
+            "params": {
+              "query": "step type email",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "find_campaign_step_subject",
+          "description": "Find step subject input",
+          "command": {
+            "tool": "mcp__claude-in-chrome__find",
+            "params": {
+              "query": "step subject input",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "set_campaign_step_subject",
+          "description": "Set step subject: Welcome",
+          "command": {
+            "tool": "mcp__claude-in-chrome__computer",
+            "params": {
+              "action": "type",
+              "text": "Welcome",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "save_campaign_step",
+          "description": "Save campaign step",
+          "command": {
+            "tool": "mcp__claude-in-chrome__find",
+            "params": {
+              "query": "save step button",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.8,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "verify_campaign_step_saved",
+          "description": "Capture campaign step state",
+          "command": {
+            "tool": "mcp__claude-in-chrome__computer",
+            "params": {
+              "action": "screenshot",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        }
+      ]
+    },
+    {
+      "domain": "funnels",
+      "action": "create_funnel_with_pages",
+      "local_id": "8125658d-6a4f-47f1-9cfb-26efe1020eaa",
+      "name": "Main Funnel",
+      "steps": [
+        {
+          "name": "navigate_funnels",
+          "description": "Navigate to funnels page",
+          "command": {
+            "tool": "mcp__claude-in-chrome__navigate",
+            "params": {
+              "url": "https://app.gohighlevel.com/sites/funnels",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 2.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "find_create_funnel",
+          "description": "Find create/new funnel button",
+          "command": {
+            "tool": "mcp__claude-in-chrome__find",
+            "params": {
+              "query": "create funnel button or new funnel",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "wait_funnel_editor",
+          "description": "Wait for funnel editor",
+          "command": {
+            "tool": "mcp__claude-in-chrome__computer",
+            "params": {
+              "action": "wait",
+              "duration": 1.5,
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "set_funnel_name",
+          "description": "Set funnel name: Main Funnel",
+          "command": {
+            "tool": "mcp__claude-in-chrome__computer",
+            "params": {
+              "action": "type",
+              "text": "Main Funnel",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "save_funnel",
+          "description": "Save funnel",
+          "command": {
+            "tool": "mcp__claude-in-chrome__find",
+            "params": {
+              "query": "save funnel button",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 1.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "verify_funnel_saved",
+          "description": "Capture saved funnel",
+          "command": {
+            "tool": "mcp__claude-in-chrome__computer",
+            "params": {
+              "action": "screenshot",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "open_funnel_for_page_add",
+          "description": "Open funnel editor for: Main Funnel",
+          "command": {
+            "tool": "mcp__claude-in-chrome__find",
+            "params": {
+              "query": "funnel named Main Funnel",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 1.2,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "find_add_funnel_page",
+          "description": "Find add page button",
+          "command": {
+            "tool": "mcp__claude-in-chrome__find",
+            "params": {
+              "query": "add page button",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "set_funnel_page_name",
+          "description": "Set page name: Landing",
+          "command": {
+            "tool": "mcp__claude-in-chrome__computer",
+            "params": {
+              "action": "type",
+              "text": "Landing",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "set_funnel_page_slug",
+          "description": "Set page slug: landing",
+          "command": {
+            "tool": "mcp__claude-in-chrome__computer",
+            "params": {
+              "action": "type",
+              "text": "landing",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "save_funnel_page",
+          "description": "Save funnel page",
+          "command": {
+            "tool": "mcp__claude-in-chrome__find",
+            "params": {
+              "query": "save page button",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.8,
+          "screenshot_after": false,
+          "required": true
+        },
+        {
+          "name": "verify_funnel_page_saved",
+          "description": "Capture funnel page state",
+          "command": {
+            "tool": "mcp__claude-in-chrome__computer",
+            "params": {
+              "action": "screenshot",
+              "tabId": 12345
+            }
+          },
+          "wait_after": 0.5,
+          "screenshot_after": false,
+          "required": true
+        }
+      ]
+    }
+  ]
+}
