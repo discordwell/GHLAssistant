@@ -49,6 +49,11 @@ class CRMSettings(BaseSettings):
     sync_assets_media_library_archive_sample: int = 50
     sync_assets_download_during_import: bool = False
     sync_assets_download_limit: int = 200
+    # Export: upload local/discovered assets into GHL Media Library (requires `token-id` from browser capture).
+    sync_assets_export_enabled: bool = False
+    sync_assets_export_limit: int = 50
+    # Comma-separated Asset.source values to upload (default: funnel-page assets only).
+    sync_assets_export_sources: str = "funnel_page_data_uri,funnel_page_html"
 
     asset_blobstore_dir: str = "data/blobstore"
 

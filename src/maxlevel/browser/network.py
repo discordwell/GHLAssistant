@@ -190,14 +190,22 @@ class NetworkCapture:
                     if not body_result:
                         return
 
-                    body = getattr(body_result, "body", None)
-                    base64_encoded = bool(
-                        getattr(
-                            body_result,
-                            "base64_encoded",
-                            getattr(body_result, "base64Encoded", False),
+                    # nodriver versions differ: body_result may be an object with attributes
+                    # or a plain dict like {"body": "...", "base64Encoded": false}.
+                    if isinstance(body_result, dict):
+                        body = body_result.get("body")
+                        base64_encoded = bool(
+                            body_result.get("base64Encoded", body_result.get("base64_encoded", False))
                         )
-                    )
+                    else:
+                        body = getattr(body_result, "body", None)
+                        base64_encoded = bool(
+                            getattr(
+                                body_result,
+                                "base64_encoded",
+                                getattr(body_result, "base64Encoded", False),
+                            )
+                        )
 
                     if base64_encoded:
                         req.response_body_base64 = True
@@ -255,12 +263,18 @@ class NetworkCapture:
 
         Looks for:
         - Authorization headers (Bearer tokens)
+        - token-id headers (Firebase ID token used by some services.* endpoints)
         - Cookie tokens
         - Request/response body tokens
         """
         tokens = {}
 
         for req in self.requests.values():
+            # token-id header (commonly used by services.leadconnectorhq.com)
+            token_id = req.headers.get("token-id") or req.headers.get("Token-Id") or req.headers.get("token_id")
+            if token_id and "token_id" not in tokens:
+                tokens["token_id"] = token_id
+
             # Check Authorization header
             auth_header = req.headers.get("Authorization") or req.headers.get("authorization")
             if auth_header:

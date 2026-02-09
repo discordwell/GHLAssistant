@@ -42,6 +42,8 @@ class GHLConfig:
     """GHL API configuration."""
 
     token: str
+    # Firebase ID token used by some services.* endpoints (e.g., media library upload).
+    token_id: str | None = None
     user_id: str | None = None
     company_id: str | None = None
     location_id: str | None = None
@@ -58,7 +60,10 @@ class GHLConfig:
         if filepath is None:
             # Find most recent session
             log_dir = Path(__file__).parent.parent.parent.parent / "data" / "network_logs"
-            sessions = sorted(log_dir.glob("session_*.json"))
+            sessions = sorted(
+                log_dir.glob("session_*.json"),
+                key=lambda p: (p.stat().st_mtime if p.exists() else 0),
+            )
             if not sessions:
                 raise FileNotFoundError(
                     "No session files found. Run 'maxlevel auth quick' first."
@@ -71,6 +76,24 @@ class GHLConfig:
         token = data.get("auth", {}).get("access_token")
         if not token:
             raise ValueError("No access token found in session file")
+
+        token_id = data.get("auth", {}).get("token_id") or None
+
+        if not token_id:
+            # Best-effort: scan captured headers for `token-id`.
+            def _scan(items: list[dict]) -> str | None:
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    headers = item.get("headers") or {}
+                    if not isinstance(headers, dict):
+                        continue
+                    for k, v in headers.items():
+                        if isinstance(k, str) and k.lower() == "token-id" and isinstance(v, str) and v.strip():
+                            return v.strip()
+                return None
+
+            token_id = _scan(data.get("api_calls", []) or []) or _scan(data.get("network_log", []) or [])
 
         # Extract IDs from API calls
         user_id = None
@@ -96,6 +119,7 @@ class GHLConfig:
 
         return cls(
             token=token,
+            token_id=token_id,
             user_id=user_id,
             company_id=company_id,
             location_id=location_id,
@@ -130,6 +154,7 @@ class GHLConfig:
         """Export config as dictionary."""
         return {
             "token": self.token[:50] + "..." if self.token else None,
+            "token_id": (self.token_id[:50] + "...") if self.token_id else None,
             "user_id": self.user_id,
             "company_id": self.company_id,
             "location_id": self.location_id,

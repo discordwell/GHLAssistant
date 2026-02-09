@@ -38,6 +38,7 @@ from .import_media_library import import_media_library
 from .export_conversations import export_conversations
 from .export_calendars import export_calendars
 from .export_workflows import export_workflows_via_browser
+from .export_assets import export_assets
 from .archive import write_sync_archive
 from .browser_fallback import export_browser_backed_resources
 from ..config import settings
@@ -866,6 +867,25 @@ async def run_export(db: AsyncSession, location: Location) -> SyncResult:
     total = SyncResult()
 
     async with await _get_ghl_client() as ghl:
+        # 0. Assets (optional): upload local/discovered assets to GHL Media Library
+        # so later exports can rewrite content URLs deterministically.
+        if settings.sync_assets_enabled and settings.sync_assets_export_enabled:
+            try:
+                r = await export_assets(
+                    db,
+                    location,
+                    ghl,
+                    blobstore_dir=str(settings.blobstore_dir),
+                    limit=int(settings.sync_assets_export_limit or 0),
+                    sources_csv=settings.sync_assets_export_sources,
+                )
+                total.created += r.created
+                total.updated += r.updated
+                total.skipped += r.skipped
+                total.errors.extend(r.errors)
+            except Exception as e:
+                total.errors.append(f"Assets export error: {e}")
+
         # 1. Tags
         r = await export_tags(db, location, ghl)
         total.created += r.created

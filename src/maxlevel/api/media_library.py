@@ -7,6 +7,7 @@ This module is best-effort and supports multiple internal endpoint variants.
 from __future__ import annotations
 
 import json
+import mimetypes
 import os
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
@@ -16,6 +17,9 @@ import httpx
 
 if TYPE_CHECKING:
     from .client import GHLClient
+
+
+SERVICES_BASE_URL = "https://services.leadconnectorhq.com"
 
 
 def _extract_list_payload(resp: dict[str, Any]) -> list[dict[str, Any]]:
@@ -158,11 +162,95 @@ class MediaLibraryAPI:
         self._discovered: tuple[str, dict[str, Any]] | None = None
 
     @property
+    def _token_id(self) -> str | None:
+        tok = self._client.config.token_id
+        if not isinstance(tok, str):
+            return None
+        tok = tok.strip()
+        return tok or None
+
+    @property
     def _location_id(self) -> str:
         lid = self._client.config.location_id
         if not lid:
             raise ValueError("location_id required")
         return lid
+
+    def _services_base_url(self) -> str:
+        override = os.environ.get("MAXLEVEL_SERVICES_BASE_URL")
+        if isinstance(override, str) and override.strip().lower().startswith(("http://", "https://")):
+            return override.strip().rstrip("/")
+        return SERVICES_BASE_URL
+
+    def _services_headers(self) -> dict[str, str]:
+        token_id = self._token_id
+        if not token_id:
+            raise RuntimeError(
+                "token_id missing (required for services.* Media Library endpoints). "
+                "Capture a browser session and load config via GHLConfig.from_session_file()."
+            )
+
+        # services.leadconnectorhq.com uses token-id (Firebase ID token) instead of
+        # Authorization Bearer for some endpoints.
+        return {
+            "token-id": token_id,
+            "Accept": "application/json, text/plain, */*",
+            **self._client.REQUIRED_HEADERS,
+        }
+
+    def _require_http_client(self) -> httpx.AsyncClient:
+        if not getattr(self._client, "_client", None):
+            raise RuntimeError("Client not initialized. Use 'async with' context.")
+        return self._client._client  # type: ignore[return-value]
+
+    async def _services_get_json(self, path: str, *, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        client = self._require_http_client()
+        url = f"{self._services_base_url()}{path}"
+        resp = await client.get(url, params=params or {}, headers=self._services_headers())
+        resp.raise_for_status()
+        return resp.json()
+
+    async def _services_post_json(self, path: str, *, data: dict[str, Any] | None = None) -> dict[str, Any]:
+        client = self._require_http_client()
+        url = f"{self._services_base_url()}{path}"
+        headers = dict(self._services_headers())
+        headers["Content-Type"] = "application/json"
+        resp = await client.post(url, json=data or {}, headers=headers)
+        resp.raise_for_status()
+        return resp.json()
+
+    async def list_files_services(
+        self,
+        *,
+        location_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        folder_id: str | None = None,
+        mode: str = "public",
+        type: str = "file",
+        query: str = "",
+        sort_by: str = "updatedAt",
+        sort_order: str = "desc",
+    ) -> dict[str, Any]:
+        """List media files using services.leadconnectorhq.com endpoints.
+
+        This path tends to be the most stable across accounts, but requires
+        a `token-id` captured from browser traffic.
+        """
+        lid = location_id or self._location_id
+        params: dict[str, Any] = {
+            "altId": lid,
+            "altType": "location",
+            "parentId": (folder_id or ""),
+            "query": (query or ""),
+            "type": (type or "file"),
+            "sortBy": (sort_by or "updatedAt"),
+            "sortOrder": (sort_order or "desc"),
+            "mode": (mode or "public"),
+            "offset": int(offset),
+            "limit": int(limit),
+        }
+        return await self._services_get_json("/medias/files/", params=params)
 
     def _candidate_endpoints(self, *, location_id: str) -> list[str]:
         override = os.environ.get("MAXLEVEL_MEDIA_LIBRARY_ENDPOINT")
@@ -209,6 +297,19 @@ class MediaLibraryAPI:
         """
         lid = location_id or self._location_id
 
+        # Prefer services endpoint when we have token-id (more reliable than probing).
+        if self._token_id:
+            try:
+                return await self.list_files_services(
+                    location_id=lid,
+                    limit=limit,
+                    offset=offset,
+                    folder_id=folder_id,
+                )
+            except Exception:
+                # Fall back to internal backend endpoints (best-effort).
+                pass
+
         base_params: dict[str, Any] = {
             "locationId": lid,
             "limit": int(limit),
@@ -238,12 +339,135 @@ class MediaLibraryAPI:
 
         raise RuntimeError(f"Media library endpoint probe failed: {last_err}")
 
+    async def upload_bytes(
+        self,
+        *,
+        filename: str,
+        content_type: str,
+        data: bytes,
+        location_id: str | None = None,
+        folder_id: str | None = None,
+        mode: str = "public",
+    ) -> dict[str, Any]:
+        """Upload bytes to Media Library via services endpoints (create -> PUT -> verify)."""
+        lid = location_id or self._location_id
+        name = (filename or "").strip() or "upload.bin"
+        ct = (content_type or "").strip() or "application/octet-stream"
+        parent_id = (folder_id or "").strip()
+        size = len(data or b"")
+
+        # 1) Create an upload, get signed PUT URL.
+        created = await self._services_post_json(
+            "/medias/files/",
+            data={
+                "name": name,
+                "contentType": ct,
+                "parentId": parent_id,
+                "altType": "location",
+                "altId": lid,
+                "size": int(size),
+                "mode": mode,
+            },
+        )
+        signed_url = created.get("url")
+        file_id = created.get("aknId") or created.get("_id") or created.get("id")
+        if not isinstance(signed_url, str) or not signed_url.strip():
+            raise RuntimeError(f"Media create did not return signed url (keys={list(created.keys())})")
+        if not isinstance(file_id, str) or not file_id.strip():
+            raise RuntimeError(f"Media create did not return file id (keys={list(created.keys())})")
+
+        # 2) Upload bytes to signed URL (GCS).
+        async with httpx.AsyncClient(timeout=60.0) as raw:
+            put = await raw.put(signed_url, content=data or b"", headers={"Content-Type": ct})
+            put.raise_for_status()
+
+        # 3) Verify and return the resolved media object.
+        verified = await self._services_post_json(
+            "/medias/files/verify",
+            data={
+                "altId": lid,
+                "altType": "location",
+                "id": file_id,
+                "mode": mode,
+            },
+        )
+        return verified
+
+    async def upload_path(
+        self,
+        *,
+        path: str | Path,
+        filename: str | None = None,
+        content_type: str | None = None,
+        location_id: str | None = None,
+        folder_id: str | None = None,
+        mode: str = "public",
+        chunk_size: int = 1024 * 1024,
+    ) -> dict[str, Any]:
+        """Upload a local file to Media Library via services endpoints (streamed PUT)."""
+        lid = location_id or self._location_id
+        file_path = Path(path)
+        if not file_path.is_file():
+            raise FileNotFoundError(str(file_path))
+
+        name = (filename or file_path.name or "").strip() or "upload.bin"
+        ct = (content_type or "").strip()
+        if not ct:
+            guessed, _ = mimetypes.guess_type(name)
+            ct = guessed or "application/octet-stream"
+
+        parent_id = (folder_id or "").strip()
+        size = int(file_path.stat().st_size)
+
+        created = await self._services_post_json(
+            "/medias/files/",
+            data={
+                "name": name,
+                "contentType": ct,
+                "parentId": parent_id,
+                "altType": "location",
+                "altId": lid,
+                "size": int(size),
+                "mode": mode,
+            },
+        )
+        signed_url = created.get("url")
+        file_id = created.get("aknId") or created.get("_id") or created.get("id")
+        if not isinstance(signed_url, str) or not signed_url.strip():
+            raise RuntimeError(f"Media create did not return signed url (keys={list(created.keys())})")
+        if not isinstance(file_id, str) or not file_id.strip():
+            raise RuntimeError(f"Media create did not return file id (keys={list(created.keys())})")
+
+        def _iter_chunks() -> Any:
+            with open(file_path, "rb") as f:
+                while True:
+                    chunk = f.read(max(1, int(chunk_size)))
+                    if not chunk:
+                        break
+                    yield chunk
+
+        async with httpx.AsyncClient(timeout=60.0) as raw:
+            put = await raw.put(signed_url, content=_iter_chunks(), headers={"Content-Type": ct})
+            put.raise_for_status()
+
+        verified = await self._services_post_json(
+            "/medias/files/verify",
+            data={
+                "altId": lid,
+                "altType": "location",
+                "id": file_id,
+                "mode": mode,
+            },
+        )
+        return verified
+
     async def list_all_files(
         self,
         *,
         location_id: str | None = None,
         page_size: int = 200,
-        max_pages: int = 1000,
+        # 1000 pages can be huge (time/memory) on large accounts; keep a safe default.
+        max_pages: int = 25,
     ) -> list[dict[str, Any]]:
         """Fetch all media files using limit/offset pagination (best-effort)."""
         lid = location_id or self._location_id
