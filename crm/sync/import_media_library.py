@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..assets.hashes import asset_ref_identity_sha256
 from ..assets.jobs import enqueue_download_job
 from ..models.asset import AssetRef
 from ..models.location import Location
@@ -90,13 +91,17 @@ async def import_media_library(
         content_type = _extract_content_type(item)
 
         # Upsert AssetRef (idempotent across repeated imports).
+        identity = asset_ref_identity_sha256(
+            entity_type="media_library_file",
+            entity_id=None,
+            remote_entity_id=remote_id,
+            field_path="url",
+            usage="media_library",
+            original_url=(url or None),
+        )
         stmt = select(AssetRef).where(
             AssetRef.location_id == location.id,
-            AssetRef.entity_type == "media_library_file",
-            AssetRef.remote_entity_id == remote_id,
-            AssetRef.original_url == (url or None),
-            AssetRef.field_path == "url",
-            AssetRef.usage == "media_library",
+            AssetRef.identity_sha256 == identity,
         )
         ref = (await db.execute(stmt)).scalar_one_or_none()
 
@@ -112,6 +117,7 @@ async def import_media_library(
         else:
             ref = AssetRef(
                 location_id=location.id,
+                identity_sha256=identity,
                 asset_id=None,
                 entity_type="media_library_file",
                 entity_id=None,

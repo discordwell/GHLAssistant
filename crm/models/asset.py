@@ -58,18 +58,18 @@ class AssetRef(UUIDMixin, TimestampMixin, TenantMixin, Base):
 
     __tablename__ = "asset_ref"
     __table_args__ = (
+        # Use a fixed-size identity hash to avoid indexing large TEXT payloads
+        # (signed URLs, data: URIs) which can break Postgres btree indexes.
         UniqueConstraint(
             "location_id",
-            "entity_type",
-            "entity_id",
-            "remote_entity_id",
-            "field_path",
-            "usage",
-            "original_url",
-            name="uq_asset_ref_identity",
+            "identity_sha256",
+            name="uq_asset_ref_location_identity_sha256",
         ),
         Index("ix_asset_ref_location_entity", "location_id", "entity_type"),
+        Index("ix_asset_ref_location_identity_sha256", "location_id", "identity_sha256"),
     )
+
+    identity_sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
 
     asset_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid,
@@ -140,7 +140,13 @@ class AssetJob(UUIDMixin, TimestampMixin, TenantMixin, Base):
 
     __tablename__ = "asset_job"
     __table_args__ = (
-        UniqueConstraint("location_id", "job_type", "url", name="uq_asset_job_location_type_url"),
+        # Same idea as AssetRef: avoid indexing long TEXT URLs directly.
+        UniqueConstraint(
+            "location_id",
+            "job_type",
+            "url_sha256",
+            name="uq_asset_job_location_type_url_sha256",
+        ),
         Index("ix_asset_job_status_next", "status", "next_attempt_at"),
     )
 
@@ -164,6 +170,7 @@ class AssetJob(UUIDMixin, TimestampMixin, TenantMixin, Base):
         default=None,
     )
 
+    url_sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     url: Mapped[str | None] = mapped_column(Text, default=None)
 
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

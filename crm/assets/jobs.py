@@ -7,11 +7,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .blobstore import Sha256BlobStore
 from .downloader import AssetDownloader, DownloadError
+from .hashes import url_sha256
 from ..models.asset import Asset, AssetJob, AssetRef
 
 
@@ -45,11 +46,12 @@ async def enqueue_download_job(
         return None
 
     url = url.strip()
+    url_key = url_sha256(url)
 
     stmt = select(AssetJob).where(
         AssetJob.location_id == location_id,
         AssetJob.job_type == "download",
-        AssetJob.url == url,
+        AssetJob.url_sha256 == url_key,
     )
     existing = (await db.execute(stmt)).scalar_one_or_none()
     if existing:
@@ -66,6 +68,7 @@ async def enqueue_download_job(
         status="pending",
         priority=int(priority or 0),
         asset_ref_id=asset_ref_id,
+        url_sha256=url_key,
         url=url,
         attempts=0,
         max_attempts=5,
@@ -135,8 +138,8 @@ async def _claim_next_download_job(
     worker_id: str,
 ) -> AssetJob | None:
     now = _utcnow()
-    stmt = (
-        select(AssetJob)
+    pick_id = (
+        select(AssetJob.id)
         .where(
             AssetJob.location_id == location_id,
             AssetJob.job_type == "download",
@@ -145,18 +148,33 @@ async def _claim_next_download_job(
         )
         .order_by(AssetJob.priority.desc(), AssetJob.next_attempt_at.asc(), AssetJob.created_at.asc())
         .limit(1)
+        .scalar_subquery()
     )
-    job = (await db.execute(stmt)).scalar_one_or_none()
-    if not job:
+
+    # Atomic claim: update the next pending row and return its id.
+    # This avoids a race where multiple workers SELECT the same job before updating.
+    stmt = (
+        update(AssetJob)
+        .where(
+            AssetJob.id == pick_id,
+            AssetJob.location_id == location_id,
+            AssetJob.job_type == "download",
+            AssetJob.status == "pending",
+        )
+        .values(
+            status="in_progress",
+            locked_at=now,
+            locked_by=worker_id,
+            started_at=func.coalesce(AssetJob.started_at, now),
+        )
+        .returning(AssetJob.id)
+    )
+    job_id = (await db.execute(stmt)).scalar_one_or_none()
+    if not job_id:
         return None
 
-    job.status = "in_progress"
-    job.locked_at = now
-    job.locked_by = worker_id
-    job.started_at = job.started_at or now
     await db.commit()
-    await db.refresh(job)
-    return job
+    return await db.get(AssetJob, job_id)
 
 
 async def process_download_jobs(
@@ -244,4 +262,3 @@ async def process_download_jobs(
         failed=failed,
         skipped=skipped,
     )
-

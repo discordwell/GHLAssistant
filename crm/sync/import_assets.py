@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..assets.blobstore import BlobStore
+from ..assets.hashes import asset_ref_identity_sha256, url_sha256 as url_sha256_hex
 from ..assets.html import iter_html_asset_candidates, parse_data_uri, sha256_hex
 from ..models.asset import Asset, AssetJob, AssetRef
 from ..models.funnel import Funnel, FunnelPage
@@ -94,17 +95,20 @@ async def _upsert_asset_ref(
     remote_entity_id: str | None,
     field_path: str,
     usage: str | None,
-    original_url: str,
+    original_url: str | None,
     meta_json: dict | None,
 ) -> tuple[AssetRef, bool]:
+    identity = asset_ref_identity_sha256(
+        entity_type=entity_type,
+        entity_id=entity_id,
+        remote_entity_id=remote_entity_id,
+        field_path=field_path,
+        usage=usage,
+        original_url=original_url,
+    )
     stmt = select(AssetRef).where(
         AssetRef.location_id == location_id,
-        AssetRef.entity_type == entity_type,
-        AssetRef.entity_id == entity_id,
-        AssetRef.remote_entity_id == remote_entity_id,
-        AssetRef.field_path == field_path,
-        AssetRef.usage == usage,
-        AssetRef.original_url == original_url,
+        AssetRef.identity_sha256 == identity,
     )
     existing = (await db.execute(stmt)).scalar_one_or_none()
     now = _now()
@@ -120,6 +124,7 @@ async def _upsert_asset_ref(
 
     ref = AssetRef(
         location_id=location_id,
+        identity_sha256=identity,
         asset_id=asset_id,
         entity_type=entity_type,
         entity_id=entity_id,
@@ -144,10 +149,11 @@ async def _enqueue_download_job(
     priority: int = 0,
     meta_json: dict | None = None,
 ) -> tuple[AssetJob, bool]:
+    url_key = url_sha256_hex(url)
     stmt = select(AssetJob).where(
         AssetJob.location_id == location_id,
         AssetJob.job_type == "download",
-        AssetJob.url == url,
+        AssetJob.url_sha256 == url_key,
     )
     existing = (await db.execute(stmt)).scalar_one_or_none()
     if existing:
@@ -155,7 +161,6 @@ async def _enqueue_download_job(
             existing.asset_ref_id = asset_ref_id
         if meta_json and not existing.meta_json:
             existing.meta_json = meta_json
-            return existing, False
         return existing, False
 
     job = AssetJob(
@@ -164,6 +169,7 @@ async def _enqueue_download_job(
         status="pending",
         priority=int(priority or 0),
         asset_ref_id=asset_ref_id,
+        url_sha256=url_key,
         url=url,
         attempts=0,
         max_attempts=5,
@@ -226,7 +232,7 @@ async def discover_funnel_page_html_assets(
                     if created:
                         result.assets_created += 1
                     else:
-                        result.assets_updated += 1
+                            result.assets_updated += 1
 
                     _, ref_created = await _upsert_asset_ref(
                         db,
@@ -237,8 +243,9 @@ async def discover_funnel_page_html_assets(
                         remote_entity_id=page.ghl_id,
                         field_path="content_html",
                         usage=c.usage,
-                        original_url=c.raw_url,
-                        meta_json={"fetch_url": c.fetch_url, "context": c.context},
+                        # Avoid storing massive base64 payloads in the DB; bytes live in blobstore.
+                        original_url=f"data:sha256:{sha}",
+                        meta_json={"sha256": sha, "content_type": content_type, "context": c.context},
                     )
                     if ref_created:
                         result.refs_created += 1

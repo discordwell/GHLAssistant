@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import AsyncIterator
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, unquote_to_bytes, urlparse
 
 import httpx
 
@@ -82,7 +82,7 @@ def _parse_data_uri(uri: str) -> tuple[bytes, str | None]:
 
     # Percent-decoded bytes
     try:
-        return unquote(payload).encode("utf-8"), ct
+        return unquote_to_bytes(payload), ct
     except Exception as e:
         raise DownloadError(f"data URI decode failed: {e}") from e
 
