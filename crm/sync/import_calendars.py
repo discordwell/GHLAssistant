@@ -17,22 +17,28 @@ from .raw_store import upsert_raw_entity
 async def import_calendars(
     db: AsyncSession, location: Location, calendars_data: list[dict],
     appointments_data: dict[str, list[dict]] | None = None,
+    details_by_calendar: dict[str, dict] | None = None,
 ) -> SyncResult:
     """Import calendars and appointments from GHL."""
     result = SyncResult()
     appointments_data = appointments_data or {}
+    details_by_calendar = details_by_calendar or {}
 
     for cal_data in calendars_data:
         ghl_id = cal_data.get("id", cal_data.get("_id", ""))
         name = cal_data.get("name", "")
         if not name:
             continue
+
+        detail_payload = details_by_calendar.get(ghl_id)
+        if not isinstance(detail_payload, dict):
+            detail_payload = {}
         await upsert_raw_entity(
             db,
             location=location,
             entity_type="calendar",
             ghl_id=ghl_id,
-            payload=cal_data,
+            payload={"list": cal_data, "detail": detail_payload},
         )
 
         stmt = select(Calendar).where(
@@ -40,17 +46,36 @@ async def import_calendars(
         )
         cal = (await db.execute(stmt)).scalar_one_or_none()
 
+        source_payload = detail_payload.get("calendar") if isinstance(detail_payload.get("calendar"), dict) else detail_payload
+        if not isinstance(source_payload, dict):
+            source_payload = {}
+
+        description = source_payload.get("description", cal_data.get("description"))
+        timezone_val = source_payload.get("timezone", cal_data.get("timezone", "America/New_York"))
+        slot_duration = source_payload.get("slotDuration", cal_data.get("slotDuration", 30))
+        buffer_before = source_payload.get("bufferBefore", cal_data.get("bufferBefore", 0))
+        buffer_after = source_payload.get("bufferAfter", cal_data.get("bufferAfter", 0))
+        is_active = source_payload.get("isActive", cal_data.get("isActive", True))
+
         if cal:
             cal.name = name
-            cal.description = cal_data.get("description")
+            cal.description = description
+            cal.timezone = timezone_val or cal.timezone
+            cal.slot_duration = int(slot_duration) if isinstance(slot_duration, (int, float)) else cal.slot_duration
+            cal.buffer_before = int(buffer_before) if isinstance(buffer_before, (int, float)) else cal.buffer_before
+            cal.buffer_after = int(buffer_after) if isinstance(buffer_after, (int, float)) else cal.buffer_after
+            cal.is_active = bool(is_active) if isinstance(is_active, bool) or isinstance(is_active, int) else cal.is_active
             cal.last_synced_at = datetime.now(timezone.utc)
             result.updated += 1
         else:
             cal = Calendar(
                 location_id=location.id, name=name,
-                description=cal_data.get("description"),
-                timezone=cal_data.get("timezone", "America/New_York"),
-                slot_duration=cal_data.get("slotDuration", 30),
+                description=description,
+                timezone=timezone_val or "America/New_York",
+                slot_duration=int(slot_duration) if isinstance(slot_duration, (int, float)) else 30,
+                buffer_before=int(buffer_before) if isinstance(buffer_before, (int, float)) else 0,
+                buffer_after=int(buffer_after) if isinstance(buffer_after, (int, float)) else 0,
+                is_active=bool(is_active) if isinstance(is_active, bool) or isinstance(is_active, int) else True,
                 ghl_id=ghl_id,
                 ghl_location_id=location.ghl_location_id,
                 last_synced_at=datetime.now(timezone.utc),

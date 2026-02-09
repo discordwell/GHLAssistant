@@ -435,6 +435,842 @@ class GHLBrowserTasks:
     # Workflow Tasks
     # =========================================================================
 
+    def create_workflow_via_ui(
+        self,
+        name: str,
+        trigger: str = "manual",
+        status: str = "draft",
+        *,
+        include_finalize_steps: bool = True,
+    ) -> list[TaskStep]:
+        """Generate steps to create a workflow via UI (best-effort).
+
+        Notes:
+            GHL does not expose a stable workflow creation API for most accounts.
+            This task intentionally uses fuzzy element-finding to be resilient to
+            minor UI changes. Trigger configuration beyond basic selection is
+            not guaranteed and should be treated as best-effort.
+        """
+        steps: list[TaskStep] = [
+            TaskStep(
+                name="navigate_automations",
+                description="Navigate to automations/workflows page",
+                command=self.agent.navigate(self._deeplink("/automations")),
+                wait_after=3.0,
+            ),
+            TaskStep(
+                name="screenshot_automations",
+                description="Capture automations page",
+                command=self.agent.screenshot(),
+            ),
+            TaskStep(
+                name="find_create_workflow",
+                description="Find create workflow button",
+                command=self.agent.find_elements("create workflow button or add new workflow"),
+            ),
+            TaskStep(
+                name="wait_workflow_modal",
+                description="Wait for workflow creation modal",
+                command=self.agent.wait(1.5),
+            ),
+            TaskStep(
+                name="find_start_scratch",
+                description="Find 'Start from scratch' option",
+                command=self.agent.find_elements("start from scratch or blank workflow"),
+            ),
+            TaskStep(
+                name="wait_workflow_builder",
+                description="Wait for workflow builder to load",
+                command=self.agent.wait(2.0),
+            ),
+            TaskStep(
+                name="screenshot_workflow_builder",
+                description="Capture workflow builder",
+                command=self.agent.screenshot(),
+            ),
+            TaskStep(
+                name="find_workflow_name",
+                description="Find workflow name input",
+                command=self.agent.find_elements("workflow name input or untitled workflow"),
+            ),
+            TaskStep(
+                name="set_workflow_name",
+                description=f"Set workflow name: {name}",
+                command={
+                    "tool": "mcp__claude-in-chrome__form_input",
+                    "params": {"value": name, "tabId": self.tab_id},
+                },
+                wait_after=0.4,
+            ),
+        ]
+
+        trigger_steps = self._add_workflow_trigger_via_ui(trigger)
+        if trigger_steps:
+            steps.extend(trigger_steps)
+
+        if include_finalize_steps:
+            steps.extend(self.finalize_workflow_via_ui(status=status))
+
+        return steps
+
+    def finalize_workflow_via_ui(self, *, status: str = "draft") -> list[TaskStep]:
+        """Best-effort: save/publish the current workflow.
+
+        This is intentionally optional because account/UI variants may not expose
+        the same save/publish affordances. We still reconcile by name afterward.
+        """
+        save_query = "save workflow button or publish workflow button"
+        if status and str(status).lower() == "published":
+            save_query = "publish workflow button"
+
+        return [
+            TaskStep(
+                name="find_save_workflow",
+                description="Find save/publish workflow button",
+                command=self.agent.find_elements(save_query),
+                required=False,
+            ),
+            TaskStep(
+                name="wait_workflow_save",
+                description="Wait for workflow to save",
+                command=self.agent.wait(2.0),
+                required=False,
+            ),
+            TaskStep(
+                name="verify_workflow_saved",
+                description="Capture saved workflow",
+                command=self.agent.screenshot(),
+                required=False,
+            ),
+        ]
+
+    def _add_workflow_trigger_via_ui(self, trigger: str) -> list[TaskStep]:
+        """Best-effort trigger selection for workflow creation."""
+        trigger = (trigger or "").strip().lower()
+        query_by_trigger = {
+            "conversation_ai": "conversation AI trigger or AI response or bot response",
+            "voice_ai": "voice AI trigger or call completed or call action",
+            "contact_created": "contact created trigger or new contact",
+            "tag_added": "tag added trigger or contact tag added",
+            "tag_removed": "tag removed trigger or contact tag removed",
+            "opportunity_stage_changed": "opportunity stage changed trigger or pipeline stage changed",
+            "form_submitted": "form submitted trigger or form submission",
+            # Default fallback.
+            "manual": "manual trigger or contact added or workflow trigger",
+        }
+        query = query_by_trigger.get(trigger) or query_by_trigger["manual"]
+
+        return [
+            TaskStep(
+                name="find_trigger_block",
+                description="Find add trigger block",
+                command=self.agent.find_elements("add trigger or trigger placeholder"),
+                required=False,
+            ),
+            TaskStep(
+                name="wait_trigger_menu",
+                description="Wait for trigger menu",
+                command=self.agent.wait(1.0),
+                required=False,
+            ),
+            TaskStep(
+                name="find_trigger_option",
+                description=f"Find trigger option for: {trigger or 'manual'}",
+                command=self.agent.find_elements(query),
+                required=False,
+            ),
+            TaskStep(
+                name="wait_trigger_config",
+                description="Wait for trigger configuration",
+                command=self.agent.wait(1.0),
+                required=False,
+            ),
+            TaskStep(
+                name="screenshot_trigger_config",
+                description="Capture trigger configuration",
+                command=self.agent.screenshot(),
+                required=False,
+            ),
+        ]
+
+    def configure_workflow_trigger_details_via_ui(
+        self,
+        trigger: str,
+        config: dict[str, Any] | None = None,
+    ) -> list[TaskStep]:
+        """Best-effort: fill in trigger details (tag/form/pipeline-stage).
+
+        These fields can appear in different UI layouts; treat all steps as optional.
+        """
+        trigger = (trigger or "").strip().lower()
+        config = config if isinstance(config, dict) else {}
+        steps: list[TaskStep] = []
+
+        tag = config.get("tag")
+        form = config.get("form")
+        pipeline = config.get("pipeline")
+        stage = config.get("stage")
+
+        if trigger in {"tag_added", "tag_removed"} and isinstance(tag, str) and tag.strip():
+            tag = tag.strip()
+            steps.extend(
+                [
+                    TaskStep(
+                        name="wf_trigger_find_tag_input",
+                        description="Trigger config: find tag input",
+                        command=self.agent.find_elements("tag input or select tag"),
+                        required=False,
+                    ),
+                    TaskStep(
+                        name="wf_trigger_set_tag",
+                        description=f"Trigger config: set tag: {tag}",
+                        command={
+                            "tool": "mcp__claude-in-chrome__form_input",
+                            "params": {"value": tag, "tabId": self.tab_id},
+                        },
+                        wait_after=0.4,
+                        required=False,
+                    ),
+                    TaskStep(
+                        name="wf_trigger_confirm_tag",
+                        description="Trigger config: confirm tag selection",
+                        command=self.agent.press_key("Enter"),
+                        wait_after=0.6,
+                        required=False,
+                    ),
+                ]
+            )
+
+        if trigger == "form_submitted" and isinstance(form, str) and form.strip():
+            form = form.strip()
+            steps.extend(
+                [
+                    TaskStep(
+                        name="wf_trigger_find_form_input",
+                        description="Trigger config: find form selector",
+                        command=self.agent.find_elements("form input or select form or form dropdown"),
+                        required=False,
+                    ),
+                    TaskStep(
+                        name="wf_trigger_set_form",
+                        description=f"Trigger config: set form: {form}",
+                        command={
+                            "tool": "mcp__claude-in-chrome__form_input",
+                            "params": {"value": form, "tabId": self.tab_id},
+                        },
+                        wait_after=0.4,
+                        required=False,
+                    ),
+                    TaskStep(
+                        name="wf_trigger_confirm_form",
+                        description="Trigger config: confirm form selection",
+                        command=self.agent.press_key("Enter"),
+                        wait_after=0.6,
+                        required=False,
+                    ),
+                ]
+            )
+
+        if trigger == "opportunity_stage_changed":
+            if isinstance(pipeline, str) and pipeline.strip():
+                pipeline = pipeline.strip()
+                steps.extend(
+                    [
+                        TaskStep(
+                            name="wf_trigger_find_pipeline_input",
+                            description="Trigger config: find pipeline selector",
+                            command=self.agent.find_elements("pipeline dropdown or select pipeline"),
+                            required=False,
+                        ),
+                        TaskStep(
+                            name="wf_trigger_set_pipeline",
+                            description=f"Trigger config: set pipeline: {pipeline}",
+                            command={
+                                "tool": "mcp__claude-in-chrome__form_input",
+                                "params": {"value": pipeline, "tabId": self.tab_id},
+                            },
+                            wait_after=0.4,
+                            required=False,
+                        ),
+                        TaskStep(
+                            name="wf_trigger_confirm_pipeline",
+                            description="Trigger config: confirm pipeline selection",
+                            command=self.agent.press_key("Enter"),
+                            wait_after=0.6,
+                            required=False,
+                        ),
+                    ]
+                )
+
+            if isinstance(stage, str) and stage.strip():
+                stage = stage.strip()
+                steps.extend(
+                    [
+                        TaskStep(
+                            name="wf_trigger_find_stage_input",
+                            description="Trigger config: find stage selector",
+                            command=self.agent.find_elements("stage dropdown or select stage or pipeline stage"),
+                            required=False,
+                        ),
+                        TaskStep(
+                            name="wf_trigger_set_stage",
+                            description=f"Trigger config: set stage: {stage}",
+                            command={
+                                "tool": "mcp__claude-in-chrome__form_input",
+                                "params": {"value": stage, "tabId": self.tab_id},
+                            },
+                            wait_after=0.4,
+                            required=False,
+                        ),
+                        TaskStep(
+                            name="wf_trigger_confirm_stage",
+                            description="Trigger config: confirm stage selection",
+                            command=self.agent.press_key("Enter"),
+                            wait_after=0.6,
+                            required=False,
+                        ),
+                    ]
+                )
+
+        if steps:
+            steps.append(
+                TaskStep(
+                    name="wf_trigger_verify",
+                    description="Capture trigger config after filling details",
+                    command=self.agent.screenshot(),
+                    required=False,
+                )
+            )
+
+        return steps
+
+    def add_workflow_action_send_sms_via_ui(
+        self,
+        message: str,
+        *,
+        step_index: int = 1,
+    ) -> list[TaskStep]:
+        """Best-effort: add a Send SMS action to the current workflow canvas."""
+        prefix = f"wf_step_{int(step_index):03d}"
+        return [
+            TaskStep(
+                name=f"{prefix}_find_add_action",
+                description=f"Workflow step {step_index}: find add action button",
+                command=self.agent.find_elements("add action button or plus button"),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_wait_action_menu",
+                description="Wait for action menu",
+                command=self.agent.wait(0.8),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_select_send_sms",
+                description="Select Send SMS action",
+                command=self.agent.find_elements("send SMS action or SMS"),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_wait_sms_editor",
+                description="Wait for SMS editor",
+                command=self.agent.wait(0.8),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_find_sms_message",
+                description="Find SMS message field",
+                command=self.agent.find_elements("message textarea or SMS body"),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_set_sms_message",
+                description="Set SMS message",
+                command={
+                    "tool": "mcp__claude-in-chrome__form_input",
+                    "params": {"value": message, "tabId": self.tab_id},
+                },
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_save_sms_action",
+                description="Save SMS action",
+                command=self.agent.find_elements("save button or apply button"),
+                wait_after=1.0,
+                screenshot_after=True,
+                required=False,
+            ),
+        ]
+
+    def add_workflow_action_send_email_via_ui(
+        self,
+        subject: str,
+        body: str,
+        *,
+        step_index: int = 1,
+    ) -> list[TaskStep]:
+        """Best-effort: add a Send Email action to the current workflow canvas."""
+        prefix = f"wf_step_{int(step_index):03d}"
+        steps: list[TaskStep] = [
+            TaskStep(
+                name=f"{prefix}_find_add_action",
+                description=f"Workflow step {step_index}: find add action button",
+                command=self.agent.find_elements("add action button or plus button"),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_wait_action_menu",
+                description="Wait for action menu",
+                command=self.agent.wait(0.8),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_select_send_email",
+                description="Select Send Email action",
+                command=self.agent.find_elements("send email action or email"),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_wait_email_editor",
+                description="Wait for email editor",
+                command=self.agent.wait(0.8),
+                required=False,
+            ),
+        ]
+
+        if subject:
+            steps.extend(
+                [
+                    TaskStep(
+                        name=f"{prefix}_find_email_subject",
+                        description="Find email subject field",
+                        command=self.agent.find_elements("subject input"),
+                        required=False,
+                    ),
+                    TaskStep(
+                        name=f"{prefix}_set_email_subject",
+                        description="Set email subject",
+                        command={
+                            "tool": "mcp__claude-in-chrome__form_input",
+                            "params": {"value": subject, "tabId": self.tab_id},
+                        },
+                        required=False,
+                    ),
+                ]
+            )
+
+        if body:
+            steps.extend(
+                [
+                    TaskStep(
+                        name=f"{prefix}_find_email_body",
+                        description="Find email body field",
+                        command=self.agent.find_elements("email body textarea or message body"),
+                        required=False,
+                    ),
+                    TaskStep(
+                        name=f"{prefix}_set_email_body",
+                        description="Set email body",
+                        command={
+                            "tool": "mcp__claude-in-chrome__form_input",
+                            "params": {"value": body, "tabId": self.tab_id},
+                        },
+                        required=False,
+                    ),
+                ]
+            )
+
+        steps.append(
+            TaskStep(
+                name=f"{prefix}_save_email_action",
+                description="Save email action",
+                command=self.agent.find_elements("save button or apply button"),
+                wait_after=1.0,
+                screenshot_after=True,
+                required=False,
+            )
+        )
+
+        return steps
+
+    def add_workflow_action_add_tag_via_ui(
+        self,
+        tag: str,
+        *,
+        step_index: int = 1,
+    ) -> list[TaskStep]:
+        """Best-effort: add an Add Tag action to the current workflow canvas."""
+        prefix = f"wf_step_{int(step_index):03d}"
+        steps: list[TaskStep] = [
+            TaskStep(
+                name=f"{prefix}_find_add_action",
+                description=f"Workflow step {step_index}: find add action button",
+                command=self.agent.find_elements("add action button or plus button"),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_wait_action_menu",
+                description="Wait for action menu",
+                command=self.agent.wait(0.8),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_select_add_tag",
+                description="Select Add Tag action",
+                command=self.agent.find_elements("add tag action or apply tag"),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_wait_tag_editor",
+                description="Wait for tag selector",
+                command=self.agent.wait(0.8),
+                required=False,
+            ),
+        ]
+
+        if tag:
+            steps.extend(
+                [
+                    TaskStep(
+                        name=f"{prefix}_find_tag_input",
+                        description="Find tag input field",
+                        command=self.agent.find_elements("tag input"),
+                        required=False,
+                    ),
+                    TaskStep(
+                        name=f"{prefix}_set_tag_value",
+                        description=f"Set tag: {tag}",
+                        command={
+                            "tool": "mcp__claude-in-chrome__form_input",
+                            "params": {"value": tag, "tabId": self.tab_id},
+                        },
+                        wait_after=0.5,
+                        required=False,
+                    ),
+                    TaskStep(
+                        name=f"{prefix}_confirm_tag_selection",
+                        description="Confirm tag selection",
+                        command=self.agent.press_key("Enter"),
+                        wait_after=0.5,
+                        required=False,
+                    ),
+                ]
+            )
+
+        steps.append(
+            TaskStep(
+                name=f"{prefix}_save_tag_action",
+                description="Save tag action",
+                command=self.agent.find_elements("save button or apply button"),
+                wait_after=1.0,
+                screenshot_after=True,
+                required=False,
+            )
+        )
+
+        return steps
+
+    def add_workflow_action_remove_tag_via_ui(
+        self,
+        tag: str,
+        *,
+        step_index: int = 1,
+    ) -> list[TaskStep]:
+        """Best-effort: add a Remove Tag action to the current workflow canvas."""
+        prefix = f"wf_step_{int(step_index):03d}"
+        steps: list[TaskStep] = [
+            TaskStep(
+                name=f"{prefix}_find_add_action",
+                description=f"Workflow step {step_index}: find add action button",
+                command=self.agent.find_elements("add action button or plus button"),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_wait_action_menu",
+                description="Wait for action menu",
+                command=self.agent.wait(0.8),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_select_remove_tag",
+                description="Select Remove Tag action",
+                command=self.agent.find_elements("remove tag action or delete tag"),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_wait_tag_editor",
+                description="Wait for tag selector",
+                command=self.agent.wait(0.8),
+                required=False,
+            ),
+        ]
+
+        if tag:
+            steps.extend(
+                [
+                    TaskStep(
+                        name=f"{prefix}_find_tag_input",
+                        description="Find tag input field",
+                        command=self.agent.find_elements("tag input"),
+                        required=False,
+                    ),
+                    TaskStep(
+                        name=f"{prefix}_set_tag_value",
+                        description=f"Set tag: {tag}",
+                        command={
+                            "tool": "mcp__claude-in-chrome__form_input",
+                            "params": {"value": tag, "tabId": self.tab_id},
+                        },
+                        wait_after=0.5,
+                        required=False,
+                    ),
+                    TaskStep(
+                        name=f"{prefix}_confirm_tag_selection",
+                        description="Confirm tag selection",
+                        command=self.agent.press_key("Enter"),
+                        wait_after=0.5,
+                        required=False,
+                    ),
+                ]
+            )
+
+        steps.append(
+            TaskStep(
+                name=f"{prefix}_save_remove_tag_action",
+                description="Save remove tag action",
+                command=self.agent.find_elements("save button or apply button"),
+                wait_after=1.0,
+                screenshot_after=True,
+                required=False,
+            )
+        )
+
+        return steps
+
+    def add_workflow_delay_via_ui(
+        self,
+        seconds: int,
+        *,
+        step_index: int = 1,
+    ) -> list[TaskStep]:
+        """Best-effort: add a wait/delay step to the workflow."""
+        prefix = f"wf_step_{int(step_index):03d}"
+        minutes = max(1, int(round(max(0, int(seconds)) / 60)))
+        return [
+            TaskStep(
+                name=f"{prefix}_find_add_action",
+                description=f"Workflow step {step_index}: find add action button",
+                command=self.agent.find_elements("add action button or plus button"),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_wait_action_menu",
+                description="Wait for action menu",
+                command=self.agent.wait(0.8),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_select_wait",
+                description="Select wait/delay action",
+                command=self.agent.find_elements("wait action or delay"),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_wait_delay_editor",
+                description="Wait for delay editor",
+                command=self.agent.wait(0.8),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_find_delay_minutes",
+                description="Find delay minutes input",
+                command=self.agent.find_elements("minutes input or delay duration"),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_set_delay_minutes",
+                description=f"Set delay to {minutes} minute(s)",
+                command={
+                    "tool": "mcp__claude-in-chrome__form_input",
+                    "params": {"value": str(minutes), "tabId": self.tab_id},
+                },
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_save_delay",
+                description="Save delay action",
+                command=self.agent.find_elements("save button or apply button"),
+                wait_after=1.0,
+                screenshot_after=True,
+                required=False,
+            ),
+        ]
+
+    def add_workflow_action_webhook_via_ui(
+        self,
+        url: str,
+        *,
+        method: str = "POST",
+        step_index: int = 1,
+    ) -> list[TaskStep]:
+        """Best-effort: add a webhook/HTTP request action."""
+        prefix = f"wf_step_{int(step_index):03d}"
+        steps: list[TaskStep] = [
+            TaskStep(
+                name=f"{prefix}_find_add_action",
+                description=f"Workflow step {step_index}: find add action button",
+                command=self.agent.find_elements("add action button or plus button"),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_wait_action_menu",
+                description="Wait for action menu",
+                command=self.agent.wait(0.8),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_select_webhook",
+                description="Select webhook/HTTP request action",
+                command=self.agent.find_elements("webhook action or http request"),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_wait_webhook_editor",
+                description="Wait for webhook editor",
+                command=self.agent.wait(0.8),
+                required=False,
+            ),
+        ]
+
+        if method:
+            steps.append(
+                TaskStep(
+                    name=f"{prefix}_set_webhook_method",
+                    description=f"Set webhook method: {method}",
+                    command=self.agent.find_elements(f"method {method}"),
+                    required=False,
+                )
+            )
+
+        if url:
+            steps.extend(
+                [
+                    TaskStep(
+                        name=f"{prefix}_find_webhook_url",
+                        description="Find webhook URL input",
+                        command=self.agent.find_elements("webhook URL input or endpoint"),
+                        required=False,
+                    ),
+                    TaskStep(
+                        name=f"{prefix}_set_webhook_url",
+                        description="Set webhook URL",
+                        command={
+                            "tool": "mcp__claude-in-chrome__form_input",
+                            "params": {"value": url, "tabId": self.tab_id},
+                        },
+                        required=False,
+                    ),
+                ]
+            )
+
+        steps.append(
+            TaskStep(
+                name=f"{prefix}_save_webhook",
+                description="Save webhook action",
+                command=self.agent.find_elements("save button or apply button"),
+                wait_after=1.0,
+                screenshot_after=True,
+                required=False,
+            )
+        )
+
+        return steps
+
+    def add_workflow_action_create_task_via_ui(
+        self,
+        title: str,
+        *,
+        description: str | None = None,
+        step_index: int = 1,
+    ) -> list[TaskStep]:
+        """Best-effort: add a Create Task action."""
+        prefix = f"wf_step_{int(step_index):03d}"
+        steps: list[TaskStep] = [
+            TaskStep(
+                name=f"{prefix}_find_add_action",
+                description=f"Workflow step {step_index}: find add action button",
+                command=self.agent.find_elements("add action button or plus button"),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_wait_action_menu",
+                description="Wait for action menu",
+                command=self.agent.wait(0.8),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_select_create_task",
+                description="Select create task action",
+                command=self.agent.find_elements("create task action or add task"),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_wait_task_editor",
+                description="Wait for task editor",
+                command=self.agent.wait(0.8),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_find_task_title",
+                description="Find task title input",
+                command=self.agent.find_elements("task title input"),
+                required=False,
+            ),
+            TaskStep(
+                name=f"{prefix}_set_task_title",
+                description=f"Set task title: {title}",
+                command={
+                    "tool": "mcp__claude-in-chrome__form_input",
+                    "params": {"value": title, "tabId": self.tab_id},
+                },
+                required=False,
+            ),
+        ]
+
+        if description:
+            steps.extend(
+                [
+                    TaskStep(
+                        name=f"{prefix}_find_task_description",
+                        description="Find task description field",
+                        command=self.agent.find_elements("task description textarea or notes"),
+                        required=False,
+                    ),
+                    TaskStep(
+                        name=f"{prefix}_set_task_description",
+                        description="Set task description",
+                        command={
+                            "tool": "mcp__claude-in-chrome__form_input",
+                            "params": {"value": description, "tabId": self.tab_id},
+                        },
+                        required=False,
+                    ),
+                ]
+            )
+
+        steps.append(
+            TaskStep(
+                name=f"{prefix}_save_task_action",
+                description="Save task action",
+                command=self.agent.find_elements("save button or apply button"),
+                wait_after=1.0,
+                screenshot_after=True,
+                required=False,
+            )
+        )
+
+        return steps
+
     def add_contact_to_workflow_ui(
         self,
         contact_name: str,
@@ -492,6 +1328,146 @@ class GHLBrowserTasks:
     # =========================================================================
     # Forms/Surveys/Campaigns/Funnels Tasks (UI Fallback)
     # =========================================================================
+
+    # =========================================================================
+    # Pipelines Tasks (UI Fallback)
+    # =========================================================================
+
+    def create_pipeline_via_ui(
+        self,
+        name: str,
+        description: str | None = None,
+        is_active: bool = True,
+    ) -> list[TaskStep]:
+        """Generate steps to create an opportunities pipeline via UI.
+
+        Notes:
+            GHL's public API is often read-only for pipeline/stage creation. This
+            task uses UI automation as a best-effort fallback.
+        """
+        steps: list[TaskStep] = [
+            TaskStep(
+                name="navigate_pipelines",
+                description="Navigate to pipelines page",
+                command=self.agent.navigate(self._deeplink("/opportunities/pipelines")),
+                wait_after=2.5,
+            ),
+            TaskStep(
+                name="find_create_pipeline",
+                description="Find create/new pipeline button",
+                command=self.agent.find_elements("create pipeline button or new pipeline"),
+            ),
+            TaskStep(
+                name="wait_pipeline_modal",
+                description="Wait for pipeline creation modal",
+                command=self.agent.wait(1.2),
+            ),
+            TaskStep(
+                name="find_pipeline_name",
+                description="Find pipeline name input",
+                command=self.agent.find_elements("pipeline name input"),
+            ),
+            TaskStep(
+                name="set_pipeline_name",
+                description=f"Set pipeline name: {name}",
+                command=self.agent.type_text(name),
+            ),
+        ]
+
+        if description:
+            steps.extend(
+                [
+                    TaskStep(
+                        name="find_pipeline_description",
+                        description="Find pipeline description input",
+                        command=self.agent.find_elements("pipeline description input or textarea"),
+                        required=False,
+                    ),
+                    TaskStep(
+                        name="set_pipeline_description",
+                        description="Set pipeline description",
+                        command=self.agent.type_text(description),
+                        required=False,
+                    ),
+                ]
+            )
+
+        if not is_active:
+            steps.append(
+                TaskStep(
+                    name="set_pipeline_inactive",
+                    description="Disable pipeline active toggle",
+                    command=self.agent.find_elements("active toggle"),
+                    required=False,
+                )
+            )
+
+        steps.extend(
+            [
+                TaskStep(
+                    name="save_pipeline",
+                    description="Save pipeline",
+                    command=self.agent.find_elements("save pipeline button"),
+                    wait_after=1.5,
+                ),
+                TaskStep(
+                    name="verify_pipeline_saved",
+                    description="Capture saved pipeline",
+                    command=self.agent.screenshot(),
+                ),
+            ]
+        )
+
+        return steps
+
+    def add_pipeline_stage_via_ui(
+        self,
+        pipeline_name: str,
+        stage_name: str,
+    ) -> list[TaskStep]:
+        """Generate steps to add a stage to an opportunities pipeline via UI."""
+        return [
+            TaskStep(
+                name="navigate_pipelines_for_stage",
+                description="Navigate to pipelines page",
+                command=self.agent.navigate(self._deeplink("/opportunities/pipelines")),
+                wait_after=2.5,
+            ),
+            TaskStep(
+                name="open_pipeline_for_stage",
+                description=f"Open pipeline editor for: {pipeline_name}",
+                command=self.agent.find_elements(f"pipeline named {pipeline_name}"),
+                wait_after=1.2,
+            ),
+            TaskStep(
+                name="find_add_stage",
+                description="Find add stage button",
+                command=self.agent.find_elements("add stage button or new stage"),
+            ),
+            TaskStep(
+                name="wait_stage_input",
+                description="Wait for stage input to appear",
+                command=self.agent.wait(0.8),
+            ),
+            TaskStep(
+                name="set_stage_name",
+                description=f"Set stage name: {stage_name}",
+                command=self.agent.type_text(stage_name),
+            ),
+            TaskStep(
+                name="save_stage",
+                description="Save stage",
+                command=self.agent.find_elements("save stage button"),
+                wait_after=1.0,
+                required=False,
+            ),
+            TaskStep(
+                name="verify_stage_saved",
+                description="Capture saved stage",
+                command=self.agent.screenshot(),
+                required=False,
+            ),
+        ]
 
     def create_form_via_ui(
         self,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
@@ -38,6 +39,8 @@ class SnapshotResult:
     """Maps resource_type -> {name_or_key: ghl_id}"""
     warnings: list[str] = field(default_factory=list)
     """Warnings about API calls that failed during snapshot."""
+    raw: dict[str, Any] = field(default_factory=dict)
+    """Best-effort raw payloads for loss-minimizing export/rebuild."""
 
 
 @dataclass
@@ -64,6 +67,9 @@ async def snapshot_location(
     ghl: GHLClient,
     name: str = "Location Blueprint",
     location_id: str | None = None,
+    *,
+    include_details: bool = False,
+    max_concurrency: int = 10,
 ) -> SnapshotResult:
     """Snapshot a location's configuration into a LocationBlueprint.
 
@@ -224,7 +230,169 @@ async def snapshot_location(
         funnels=funnels,
     )
 
-    return SnapshotResult(blueprint=blueprint, id_map=id_map, warnings=warnings)
+    raw: dict[str, Any] = {}
+    if include_details:
+        raw = {
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "location_id": lid,
+            "lists": {
+                "tags": tags_resp if isinstance(tags_resp, dict) else None,
+                "custom_fields": fields_resp if isinstance(fields_resp, dict) else None,
+                "custom_values": values_resp if isinstance(values_resp, dict) else None,
+                "pipelines": pipelines_resp if isinstance(pipelines_resp, dict) else None,
+                "workflows": workflows_resp if isinstance(workflows_resp, dict) else None,
+                "calendars": calendars_resp if isinstance(calendars_resp, dict) else None,
+                "forms": forms_resp if isinstance(forms_resp, dict) else None,
+                "surveys": surveys_resp if isinstance(surveys_resp, dict) else None,
+                "campaigns": campaigns_resp if isinstance(campaigns_resp, dict) else None,
+                "funnels": funnels_resp if isinstance(funnels_resp, dict) else None,
+            },
+            "details": {},
+        }
+
+        sem = asyncio.Semaphore(max(1, int(max_concurrency)))
+
+        def _extract_id(obj: dict[str, Any]) -> str:
+            for key in ("id", "_id"):
+                value = obj.get(key)
+                if isinstance(value, str) and value:
+                    return value
+            return ""
+
+        async def _fetch_detail_map(
+            items: list[dict[str, Any]],
+            fetch_fn,
+            *,
+            label: str,
+        ) -> dict[str, Any]:
+            out: dict[str, Any] = {}
+
+            async def _one(item_id: str):
+                async with sem:
+                    try:
+                        out[item_id] = await fetch_fn(item_id)
+                    except Exception as exc:
+                        warnings.append(f"Failed to fetch {label} detail {item_id}: {exc}")
+
+            ids = [_extract_id(item) for item in items if isinstance(item, dict)]
+            ids = [item_id for item_id in ids if item_id]
+            if not ids:
+                return out
+            await asyncio.gather(*(_one(item_id) for item_id in ids))
+            return out
+
+        # Workflows
+        workflows_list = (
+            workflows_resp.get("workflows", []) if isinstance(workflows_resp, dict) else []
+        )
+        if isinstance(workflows_list, list) and workflows_list:
+            raw["details"]["workflows_by_id"] = await _fetch_detail_map(
+                [w for w in workflows_list if isinstance(w, dict)],
+                ghl.workflows.get,
+                label="workflow",
+            )
+
+        # Calendars
+        calendars_list = (
+            calendars_resp.get("calendars", []) if isinstance(calendars_resp, dict) else []
+        )
+        if isinstance(calendars_list, list) and calendars_list:
+            raw["details"]["calendars_by_id"] = await _fetch_detail_map(
+                [c for c in calendars_list if isinstance(c, dict)],
+                ghl.calendars.get,
+                label="calendar",
+            )
+
+        # Forms
+        forms_list = forms_resp.get("forms", []) if isinstance(forms_resp, dict) else []
+        if isinstance(forms_list, list) and forms_list:
+            raw["details"]["forms_by_id"] = await _fetch_detail_map(
+                [f for f in forms_list if isinstance(f, dict)],
+                ghl.forms.get,
+                label="form",
+            )
+
+        # Surveys
+        surveys_list = surveys_resp.get("surveys", []) if isinstance(surveys_resp, dict) else []
+        if isinstance(surveys_list, list) and surveys_list:
+            raw["details"]["surveys_by_id"] = await _fetch_detail_map(
+                [s for s in surveys_list if isinstance(s, dict)],
+                ghl.surveys.get,
+                label="survey",
+            )
+
+        # Campaigns
+        campaigns_list = (
+            campaigns_resp.get("campaigns", []) if isinstance(campaigns_resp, dict) else []
+        )
+        if isinstance(campaigns_list, list) and campaigns_list:
+            raw["details"]["campaigns_by_id"] = await _fetch_detail_map(
+                [c for c in campaigns_list if isinstance(c, dict)],
+                ghl.campaigns.get,
+                label="campaign",
+            )
+
+        # Funnels + pages
+        funnels_list = funnels_resp.get("funnels", []) if isinstance(funnels_resp, dict) else []
+        funnels_list = [f for f in funnels_list if isinstance(f, dict)]
+        if funnels_list:
+            raw["details"]["funnels_by_id"] = await _fetch_detail_map(
+                funnels_list,
+                ghl.funnels.get,
+                label="funnel",
+            )
+
+            pages_by_funnel_id: dict[str, Any] = {}
+            page_details_by_funnel_id: dict[str, Any] = {}
+
+            async def _fetch_funnel_pages(funnel_id: str):
+                async with sem:
+                    try:
+                        pages_by_funnel_id[funnel_id] = await ghl.funnels.pages(
+                            funnel_id,
+                            location_id=lid,
+                            limit=200,
+                            offset=0,
+                        )
+                    except Exception as exc:
+                        warnings.append(f"Failed to fetch funnel pages {funnel_id}: {exc}")
+                        pages_by_funnel_id[funnel_id] = None
+
+            funnel_ids = [_extract_id(f) for f in funnels_list]
+            funnel_ids = [fid for fid in funnel_ids if fid]
+            await asyncio.gather(*(_fetch_funnel_pages(fid) for fid in funnel_ids))
+
+            async def _fetch_page_detail(funnel_id: str, page_id: str):
+                async with sem:
+                    try:
+                        page_details_by_funnel_id.setdefault(funnel_id, {})[page_id] = await ghl.funnels.get_page(
+                            funnel_id, page_id
+                        )
+                    except Exception as exc:
+                        warnings.append(
+                            f"Failed to fetch funnel page detail {funnel_id}/{page_id}: {exc}"
+                        )
+
+            page_jobs: list[tuple[str, str]] = []
+            for funnel_id, pages_resp in pages_by_funnel_id.items():
+                if not isinstance(pages_resp, dict):
+                    continue
+                pages_list = pages_resp.get("pages", [])
+                if not isinstance(pages_list, list):
+                    continue
+                for page in pages_list:
+                    if not isinstance(page, dict):
+                        continue
+                    page_id = _extract_id(page)
+                    if page_id:
+                        page_jobs.append((funnel_id, page_id))
+
+            await asyncio.gather(*(_fetch_page_detail(fid, pid) for fid, pid in page_jobs))
+
+            raw["details"]["funnel_pages_by_id"] = pages_by_funnel_id
+            raw["details"]["funnel_page_details_by_id"] = page_details_by_funnel_id
+
+    return SnapshotResult(blueprint=blueprint, id_map=id_map, warnings=warnings, raw=raw)
 
 
 async def provision_location(

@@ -17,6 +17,7 @@ from ..models.campaign import Campaign
 from ..models.form import Form
 from ..models.funnel import Funnel
 from ..models.location import Location
+from ..models.pipeline import Pipeline, PipelineStage
 from ..models.survey import Survey
 from ..schemas.sync import SyncResult
 from .archive import write_sync_archive
@@ -580,22 +581,40 @@ async def build_browser_export_plan(
     db: AsyncSession,
     location: Location,
     tab_id: int = 0,
+    domains: set[str] | list[str] | None = None,
 ) -> dict[str, Any]:
     """Build a browser-executable plan for resources lacking API export support."""
     tasks = GHLBrowserTasks(tab_id=tab_id)
 
+    allowed_domains: set[str] | None = None
+    if isinstance(domains, (set, list, tuple)):
+        allowed_domains = {
+            str(item).strip().lower()
+            for item in domains
+            if isinstance(item, str) and item.strip()
+        } or None
+    elif isinstance(domains, str) and domains.strip():
+        allowed_domains = {domains.strip().lower()}
+
+    def _include(domain: str) -> bool:
+        if allowed_domains is None:
+            return True
+        return domain.lower() in allowed_domains
+
     plan_items: list[dict[str, Any]] = []
 
-    forms = list(
-        (
-            await db.execute(
-                select(Form)
-                .where(Form.location_id == location.id, Form.ghl_id == None)  # noqa: E711
-                .options(selectinload(Form.fields))
-                .order_by(Form.created_at.asc())
-            )
-        ).scalars()
-    )
+    forms: list[Form] = []
+    if _include("forms"):
+        forms = list(
+            (
+                await db.execute(
+                    select(Form)
+                    .where(Form.location_id == location.id, Form.ghl_id == None)  # noqa: E711
+                    .options(selectinload(Form.fields))
+                    .order_by(Form.created_at.asc())
+                )
+            ).scalars()
+        )
     for form in forms:
         step_list: list[TaskStep] = tasks.create_form_via_ui(
             name=form.name,
@@ -622,16 +641,18 @@ async def build_browser_export_plan(
             }
         )
 
-    surveys = list(
-        (
-            await db.execute(
-                select(Survey)
-                .where(Survey.location_id == location.id, Survey.ghl_id == None)  # noqa: E711
-                .options(selectinload(Survey.questions))
-                .order_by(Survey.created_at.asc())
-            )
-        ).scalars()
-    )
+    surveys: list[Survey] = []
+    if _include("surveys"):
+        surveys = list(
+            (
+                await db.execute(
+                    select(Survey)
+                    .where(Survey.location_id == location.id, Survey.ghl_id == None)  # noqa: E711
+                    .options(selectinload(Survey.questions))
+                    .order_by(Survey.created_at.asc())
+                )
+            ).scalars()
+        )
     for survey in surveys:
         step_list = tasks.create_survey_via_ui(
             name=survey.name,
@@ -658,16 +679,18 @@ async def build_browser_export_plan(
             }
         )
 
-    campaigns = list(
-        (
-            await db.execute(
-                select(Campaign)
-                .where(Campaign.location_id == location.id, Campaign.ghl_id == None)  # noqa: E711
-                .options(selectinload(Campaign.steps))
-                .order_by(Campaign.created_at.asc())
-            )
-        ).scalars()
-    )
+    campaigns: list[Campaign] = []
+    if _include("campaigns"):
+        campaigns = list(
+            (
+                await db.execute(
+                    select(Campaign)
+                    .where(Campaign.location_id == location.id, Campaign.ghl_id == None)  # noqa: E711
+                    .options(selectinload(Campaign.steps))
+                    .order_by(Campaign.created_at.asc())
+                )
+            ).scalars()
+        )
     for campaign in campaigns:
         step_list = tasks.create_campaign_via_ui(
             name=campaign.name,
@@ -695,16 +718,18 @@ async def build_browser_export_plan(
             }
         )
 
-    funnels = list(
-        (
-            await db.execute(
-                select(Funnel)
-                .where(Funnel.location_id == location.id, Funnel.ghl_id == None)  # noqa: E711
-                .options(selectinload(Funnel.pages))
-                .order_by(Funnel.created_at.asc())
-            )
-        ).scalars()
-    )
+    funnels: list[Funnel] = []
+    if _include("funnels"):
+        funnels = list(
+            (
+                await db.execute(
+                    select(Funnel)
+                    .where(Funnel.location_id == location.id, Funnel.ghl_id == None)  # noqa: E711
+                    .options(selectinload(Funnel.pages))
+                    .order_by(Funnel.created_at.asc())
+                )
+            ).scalars()
+        )
     for funnel in funnels:
         step_list = tasks.create_funnel_via_ui(
             name=funnel.name,
@@ -731,11 +756,65 @@ async def build_browser_export_plan(
             }
         )
 
+    pipelines: list[Pipeline] = []
+    if _include("pipelines"):
+        all_pipelines = list(
+            (
+                await db.execute(
+                    select(Pipeline)
+                    .where(Pipeline.location_id == location.id)
+                    .options(selectinload(Pipeline.stages))
+                    .order_by(Pipeline.created_at.asc())
+                )
+            ).scalars()
+        )
+        for pipeline in all_pipelines:
+            stages = list(pipeline.stages or [])
+            if pipeline.ghl_id is None or any(stage.ghl_id is None for stage in stages):
+                pipelines.append(pipeline)
+
+    for pipeline in pipelines:
+        step_list: list[TaskStep] = []
+        if pipeline.ghl_id is None:
+            step_list.extend(
+                tasks.create_pipeline_via_ui(
+                    name=pipeline.name,
+                    description=pipeline.description,
+                    is_active=pipeline.is_active,
+                )
+            )
+
+        stages = list(pipeline.stages or [])
+        stages.sort(key=lambda s: getattr(s, "position", 0))
+        for stage in stages:
+            if stage.ghl_id is not None:
+                continue
+            step_list.extend(
+                tasks.add_pipeline_stage_via_ui(
+                    pipeline_name=pipeline.name,
+                    stage_name=stage.name,
+                )
+            )
+
+        if not step_list:
+            continue
+
+        plan_items.append(
+            {
+                "domain": "pipelines",
+                "action": "sync_pipeline_stages",
+                "local_id": str(pipeline.id),
+                "name": pipeline.name,
+                "steps": [_serialize_step(s) for s in step_list],
+            }
+        )
+
     summary: dict[str, int] = {
         "forms": len(forms),
         "surveys": len(surveys),
         "campaigns": len(campaigns),
         "funnels": len(funnels),
+        "pipelines": len(pipelines),
     }
 
     return {
@@ -1276,6 +1355,84 @@ async def reconcile_browser_export_ids(
                     local_page.ghl_id = remote_page_id
                     result.updated += 1
 
+    pipeline_ids = _target_ids(plan, "pipelines")
+    if successful_ids_by_domain is not None:
+        pipeline_ids &= successful_ids_by_domain.get("pipelines", set())
+    if pipeline_ids:
+        pipelines = list(
+            (
+                await db.execute(
+                    select(Pipeline)
+                    .where(Pipeline.location_id == location.id)
+                    .options(selectinload(Pipeline.stages))
+                )
+            ).scalars()
+        )
+        pipelines = [p for p in pipelines if str(p.id) in pipeline_ids]
+
+        try:
+            remote_pipelines = _extract_items(
+                await ghl.opportunities.pipelines(location_id=lid),
+                "pipelines",
+            )
+        except Exception as exc:
+            remote_pipelines = []
+            result.errors.append(f"Browser reconcile pipelines list failed: {exc}")
+
+        pipelines_by_name: dict[str, dict[str, Any]] = {}
+        pipelines_by_id: dict[str, dict[str, Any]] = {}
+        for remote_pipeline in remote_pipelines:
+            name_key = _normalize_name(str(remote_pipeline.get("name", "")))
+            if name_key and name_key not in pipelines_by_name:
+                pipelines_by_name[name_key] = remote_pipeline
+            remote_id = _extract_ghl_id(remote_pipeline)
+            if remote_id and remote_id not in pipelines_by_id:
+                pipelines_by_id[remote_id] = remote_pipeline
+
+        for pipeline in pipelines:
+            remote_pipeline = pipelines_by_name.get(_normalize_name(pipeline.name))
+            if not remote_pipeline and isinstance(pipeline.ghl_id, str) and pipeline.ghl_id:
+                remote_pipeline = pipelines_by_id.get(pipeline.ghl_id)
+            if not remote_pipeline:
+                continue
+
+            remote_id = _extract_ghl_id(remote_pipeline)
+            if remote_id and pipeline.ghl_id != remote_id:
+                pipeline.ghl_id = remote_id
+                pipeline.ghl_location_id = lid
+                pipeline.last_synced_at = now
+                result.updated += 1
+
+            remote_stages_raw = remote_pipeline.get("stages", [])
+            remote_stages: list[dict[str, Any]] = (
+                [item for item in remote_stages_raw if isinstance(item, dict)]
+                if isinstance(remote_stages_raw, list)
+                else []
+            )
+
+            remote_stage_by_name: dict[str, dict[str, Any]] = {}
+            for remote_stage in remote_stages:
+                key = _normalize_name(str(remote_stage.get("name", "")))
+                if key and key not in remote_stage_by_name:
+                    remote_stage_by_name[key] = remote_stage
+
+            local_stages: list[PipelineStage] = list(pipeline.stages or [])
+            local_stages.sort(key=lambda s: getattr(s, "position", 0))
+
+            for index, local_stage in enumerate(local_stages):
+                remote_stage = remote_stage_by_name.get(_normalize_name(local_stage.name))
+                if remote_stage is None and index < len(remote_stages):
+                    remote_stage = remote_stages[index]
+                if not isinstance(remote_stage, dict):
+                    continue
+
+                remote_stage_id = _extract_ghl_id(remote_stage)
+                if remote_stage_id and local_stage.ghl_id != remote_stage_id:
+                    local_stage.ghl_id = remote_stage_id
+                    local_stage.ghl_location_id = lid
+                    local_stage.last_synced_at = now
+                    result.updated += 1
+
     await db.commit()
     return result
 
@@ -1284,6 +1441,7 @@ async def export_browser_backed_resources(
     db: AsyncSession,
     location: Location,
     tab_id: int = 0,
+    domains: set[str] | list[str] | None = None,
     execute: bool = False,
     profile_name: str = "ghl_session",
     headless: bool = False,
@@ -1300,7 +1458,7 @@ async def export_browser_backed_resources(
     """Generate/execute browser fallback steps for unsupported resources."""
     result = SyncResult()
 
-    plan = await build_browser_export_plan(db, location, tab_id=tab_id)
+    plan = await build_browser_export_plan(db, location, tab_id=tab_id, domains=domains)
     items = plan.get("items", [])
     if not isinstance(items, list) or not items:
         return result

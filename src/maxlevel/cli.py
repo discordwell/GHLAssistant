@@ -453,6 +453,262 @@ def auth_status():
         console.print("[dim]Run 'maxlevel oauth connect' (recommended) or 'maxlevel auth quick'[/dim]")
 
 
+@auth_app.command("keepalive")
+def auth_keepalive(
+    profile: str = typer.Option(
+        "ghl_session",
+        "--profile", "-p",
+        help="Browser profile name",
+    ),
+    url: str = typer.Option(
+        "https://app.gohighlevel.com/",
+        "--url", "-u",
+        help="Starting URL",
+    ),
+    poke_url: str = typer.Option(
+        "https://app.gohighlevel.com/contacts/",
+        "--poke-url",
+        help="URL to navigate to when token is near expiry (to trigger refresh)",
+    ),
+    interval: int = typer.Option(
+        30,
+        "--interval",
+        help="Seconds between token checks",
+    ),
+    refresh_threshold: int = typer.Option(
+        300,
+        "--refresh-threshold",
+        help="If token expires within this many seconds, poke the app to refresh",
+    ),
+    duration: int = typer.Option(
+        0,
+        "--duration", "-d",
+        help="Run for N seconds (0 = until Ctrl+C)",
+    ),
+    headless: bool = typer.Option(
+        False,
+        "--headless/--show",
+        help="Run headless (no UI window) or show a UI window",
+    ),
+):
+    """Keep a GHL browser session alive and continually refresh the saved session token.
+
+    This keeps a Chrome profile open and periodically extracts the freshest
+    session JWT from cookies/Vue store, updating ~/.ghl/tokens.json when it changes.
+    """
+    import base64
+    import time
+    from datetime import datetime
+
+    from .auth import TokenManager
+    from .browser.agent import BrowserAgent
+
+    def _jwt_exp(token: str) -> int | None:
+        try:
+            parts = token.split(".")
+            if len(parts) < 2:
+                return None
+            payload_b64 = parts[1]
+            padding = "=" * ((4 - (len(payload_b64) % 4)) % 4)
+            payload = json.loads(base64.urlsafe_b64decode(payload_b64 + padding))
+            exp = payload.get("exp")
+            return int(exp) if isinstance(exp, (int, float)) else None
+        except Exception:
+            return None
+
+    def _expires_in_seconds(token: str) -> int | None:
+        exp = _jwt_exp(token)
+        if exp is None:
+            return None
+        return max(0, int(exp - time.time()))
+
+    async def _keepalive():
+        manager = TokenManager()
+        stored = manager.storage.load().session
+        last_saved_token = stored.token if stored else None
+        last_saved_at = 0.0
+
+        prev_location_id = stored.location_id if stored else None
+        prev_company_id = stored.company_id if stored else None
+        prev_user_id = stored.user_id if stored else None
+
+        login_prompted = False
+        started_at = time.time()
+
+        async with BrowserAgent(profile_name=profile, headless=headless, capture_network=True) as agent:
+            await agent.navigate(url)
+
+            console.print(
+                Panel(
+                    "[bold cyan]Session Keepalive Running[/bold cyan]\n\n"
+                    f"Profile: {profile}\n"
+                    f"Headless: {headless}\n"
+                    f"Interval: {interval}s\n"
+                    f"Refresh threshold: {refresh_threshold}s\n\n"
+                    "[dim]Press Ctrl+C to stop.[/dim]",
+                    title="Auth Keepalive",
+                )
+            )
+
+            while True:
+                if duration and time.time() - started_at > duration:
+                    return {"success": True, "stopped": "duration_elapsed"}
+
+                # Check UI auth state first; cookie extraction can still work on login screen
+                # but we want to surface re-auth requirements clearly.
+                logged_in = True
+                try:
+                    logged_in = bool(await agent.is_logged_in())
+                except Exception:
+                    logged_in = True
+
+                if not logged_in and not login_prompted:
+                    console.print(
+                        Panel(
+                            "[bold yellow]Re-auth required[/bold yellow]\n\n"
+                            "Complete login in the browser window.\n"
+                            "If you're using Google SSO or 2FA, you may need to approve prompts.\n\n"
+                            "[dim]Keepalive will resume automatically once logged in.[/dim]",
+                            title="Login Needed",
+                        )
+                    )
+                    login_prompted = True
+
+                cookie_auth = None
+                vue_data = None
+                tokens = {}
+                ghl_data = {}
+
+                try:
+                    cookie_auth = await agent.extract_cookie_auth()
+                except Exception:
+                    cookie_auth = None
+
+                try:
+                    vue_data = await agent.extract_vue_token()
+                except Exception:
+                    vue_data = None
+
+                try:
+                    tokens = agent.get_auth_tokens()
+                except Exception:
+                    tokens = {}
+
+                if agent.network:
+                    try:
+                        ghl_data = agent.network.get_ghl_specific() or {}
+                    except Exception:
+                        ghl_data = {}
+                    # Prevent unbounded growth for long-running sessions.
+                    try:
+                        agent.network.clear()
+                    except Exception:
+                        pass
+
+                cookie_token = cookie_auth.get("access_token") if isinstance(cookie_auth, dict) else None
+                vue_token = (
+                    vue_data.get("authToken") if isinstance(vue_data, dict) else None
+                )
+                net_token = tokens.get("access_token") if isinstance(tokens, dict) else None
+
+                candidates: list[tuple[str, str]] = []
+
+                def _add(label: str, tok: str | None) -> None:
+                    if isinstance(tok, str) and tok:
+                        candidates.append((label, tok))
+
+                _add("cookie", cookie_token)
+                _add("vue_store", vue_token)
+                _add("network_capture", net_token)
+
+                # Prefer unexpired JWTs; fall back to first available.
+                best_label = None
+                best_token = None
+                best_expires_in = None
+                for label, tok in candidates:
+                    exp_in = _expires_in_seconds(tok)
+                    if exp_in is not None and exp_in <= 0:
+                        continue
+                    best_label = label
+                    best_token = tok
+                    best_expires_in = exp_in
+                    break
+                if best_token is None and candidates:
+                    best_label, best_token = candidates[0]
+                    best_expires_in = _expires_in_seconds(best_token)
+
+                if isinstance(best_token, str) and best_token:
+                    location_id = (
+                        ghl_data.get("location_id")
+                        or (cookie_auth.get("location_id") if isinstance(cookie_auth, dict) else None)
+                        or (vue_data.get("locationId") if isinstance(vue_data, dict) else None)
+                        or prev_location_id
+                    )
+                    company_id = (
+                        (cookie_auth.get("company_id") if isinstance(cookie_auth, dict) else None)
+                        or ghl_data.get("auth", {}).get("companyId")
+                        or (vue_data.get("companyId") if isinstance(vue_data, dict) else None)
+                        or prev_company_id
+                    )
+                    user_id = (
+                        (cookie_auth.get("user_id") if isinstance(cookie_auth, dict) else None)
+                        or ghl_data.get("auth", {}).get("userId")
+                        or (vue_data.get("userId") if isinstance(vue_data, dict) else None)
+                        or prev_user_id
+                    )
+
+                    if best_token != last_saved_token and (time.time() - last_saved_at) > 1.0:
+                        manager.save_session_from_capture(
+                            token=best_token,
+                            location_id=location_id,
+                            company_id=company_id,
+                            user_id=user_id,
+                        )
+                        last_saved_token = best_token
+                        last_saved_at = time.time()
+                        prev_location_id = location_id
+                        prev_company_id = company_id
+                        prev_user_id = user_id
+
+                        expiry_str = "unknown"
+                        if isinstance(best_expires_in, int):
+                            if best_expires_in > 3600:
+                                expiry_str = f"{best_expires_in // 3600}h {(best_expires_in % 3600) // 60}m"
+                            else:
+                                expiry_str = f"{best_expires_in // 60}m {best_expires_in % 60}s"
+
+                        console.print(
+                            f"[green]Updated session token[/green] ({best_label}, expires_in={expiry_str})"
+                        )
+
+                        login_prompted = False
+
+                    # If near expiry, poke a data-heavy route to encourage refresh.
+                    if (
+                        isinstance(best_expires_in, int)
+                        and best_expires_in > 0
+                        and best_expires_in <= int(refresh_threshold)
+                    ):
+                        try:
+                            await agent.navigate(poke_url)
+                            await asyncio.sleep(3)
+                        except Exception:
+                            pass
+
+                await asyncio.sleep(max(1, int(interval)))
+
+    try:
+        result = asyncio.run(_keepalive())
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Keepalive stopped[/yellow]")
+        return
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+    _output_result(result, json_output=False)
+
+
 @auth_app.command("clear")
 def auth_clear(
     oauth_only: bool = typer.Option(False, "--oauth", help="Clear only OAuth tokens"),
@@ -3768,6 +4024,21 @@ def snapshot(
     output: str = typer.Option("blueprint.yaml", "--output", "-o", help="Output YAML file path"),
     name: str = typer.Option("Location Blueprint", "--name", "-n", help="Blueprint name"),
     location_id: str = typer.Option(None, "--location", "-l", help="Location ID (default: session)"),
+    full: bool = typer.Option(
+        False,
+        "--full",
+        help="Also capture per-resource detail payloads (for loss-minimizing rebuild/export)",
+    ),
+    raw_output: str = typer.Option(
+        None,
+        "--raw-output",
+        help="Write raw snapshot JSON to this path (default: data/sync_archives/<location>/...) when --full",
+    ),
+    max_concurrency: int = typer.Option(
+        10,
+        "--max-concurrency",
+        help="Max concurrent API calls when --full is enabled",
+    ),
 ):
     """Snapshot a location's config to a YAML blueprint."""
     from .api import GHLClient
@@ -3776,7 +4047,13 @@ def snapshot(
     async def _snapshot():
         async with GHLClient.from_session() as ghl:
             from .blueprint.engine import snapshot_location
-            result = await snapshot_location(ghl, name=name, location_id=location_id)
+            result = await snapshot_location(
+                ghl,
+                name=name,
+                location_id=location_id,
+                include_details=bool(full),
+                max_concurrency=int(max_concurrency),
+            )
             return result
 
     with console.status("[bold cyan]Snapshotting location...[/bold cyan]"):
@@ -3807,6 +4084,47 @@ def snapshot(
             title="Snapshot Complete",
         )
     )
+
+    if full:
+        from pathlib import Path
+        from datetime import datetime, timezone
+
+        raw_payload = {
+            "blueprint_file": str(filepath),
+            "blueprint": {
+                "name": bp.metadata.name,
+                "source_location_id": bp.metadata.source_location_id,
+                "created_at": bp.metadata.created_at,
+            },
+            "id_map": result.id_map,
+            "warnings": result.warnings,
+            "raw": result.raw,
+        }
+
+        out_path: Path
+        if raw_output:
+            out_path = Path(raw_output)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            # Default to a gitignored archive under the repo's data/ directory.
+            repo_root = Path(__file__).resolve().parents[2]
+            safe_loc = (
+                "".join(
+                    ch for ch in (bp.metadata.source_location_id or "unknown")
+                    if ch.isalnum() or ch in ("-", "_")
+                )
+                or "unknown"
+            )
+            out_dir = repo_root / "data" / "sync_archives" / safe_loc
+            out_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            out_path = out_dir / f"{ts}_blueprint_snapshot_full.json"
+
+        try:
+            out_path.write_text(json.dumps(raw_payload, indent=2, default=str), encoding="utf-8")
+            console.print(f"\n[green]Full snapshot raw payload saved:[/green] {out_path}")
+        except Exception as exc:
+            console.print(f"\n[yellow]Warning:[/yellow] Failed to write raw snapshot: {exc}")
 
 
 @app.command()

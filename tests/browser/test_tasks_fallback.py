@@ -97,3 +97,55 @@ def test_create_funnel_and_page_tasks(mock_tab_id):
     assert _find_step(funnel_steps, "publish_funnel")
     assert _find_step(page_steps, "publish_funnel_page")
     assert _find_step(page_steps, "save_funnel_page")
+
+
+def test_create_pipeline_and_stage_tasks(mock_tab_id):
+    tasks = GHLBrowserTasks(tab_id=mock_tab_id)
+
+    pipeline_steps = tasks.create_pipeline_via_ui(
+        name="Sales Pipeline",
+        description="Primary sales pipeline",
+        is_active=True,
+    )
+    stage_steps = tasks.add_pipeline_stage_via_ui(
+        pipeline_name="Sales Pipeline",
+        stage_name="New Lead",
+    )
+
+    navigate = _find_step(pipeline_steps, "navigate_pipelines")
+    assert navigate.command["tool"] == "mcp__claude-in-chrome__navigate"
+    assert "opportunities/pipelines" in navigate.command["params"]["url"]
+    assert _find_step(pipeline_steps, "save_pipeline")
+    assert _find_step(stage_steps, "find_add_stage")
+
+
+def test_create_workflow_via_ui_generates_expected_steps(mock_tab_id):
+    tasks = GHLBrowserTasks(tab_id=mock_tab_id)
+    steps = tasks.create_workflow_via_ui(
+        name="Test Workflow",
+        trigger="manual",
+        status="draft",
+    )
+
+    navigate = _find_step(steps, "navigate_automations")
+    assert navigate.command["tool"] == "mcp__claude-in-chrome__navigate"
+    assert "automations" in navigate.command["params"]["url"]
+    assert navigate.command["params"]["tabId"] == mock_tab_id
+
+    set_name = _find_step(steps, "set_workflow_name")
+    assert set_name.command["tool"] == "mcp__claude-in-chrome__form_input"
+    assert set_name.command["params"]["value"] == "Test Workflow"
+
+    assert _find_step(steps, "find_trigger_block")
+    assert _find_step(steps, "find_save_workflow")
+
+
+def test_workflow_action_steps_include_prefix(mock_tab_id):
+    tasks = GHLBrowserTasks(tab_id=mock_tab_id)
+
+    sms_steps = tasks.add_workflow_action_send_sms_via_ui("Hello", step_index=2)
+    assert _find_step(sms_steps, "wf_step_002_find_add_action")
+    assert _find_step(sms_steps, "wf_step_002_select_send_sms")
+
+    delay_steps = tasks.add_workflow_delay_via_ui(120, step_index=3)
+    assert _find_step(delay_steps, "wf_step_003_select_wait")

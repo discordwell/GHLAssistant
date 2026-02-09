@@ -36,6 +36,7 @@ class CRMSettings(BaseSettings):
     sync_browser_login_email: str | None = None
     sync_browser_login_password: str | None = None
     sync_browser_login_timeout_seconds: int = 120
+    sync_workflow_fidelity: int = 2
 
     model_config = {"env_prefix": "CRM_", "env_file": ".env", "extra": "ignore"}
 

@@ -15,6 +15,7 @@ from crm.models.campaign import Campaign, CampaignStep
 from crm.models.form import Form, FormField
 from crm.models.funnel import Funnel, FunnelPage
 from crm.models.location import Location
+from crm.models.pipeline import Pipeline, PipelineStage
 from crm.models.survey import Survey, SurveyQuestion
 from crm.schemas.sync import SyncResult
 from crm.sync.browser_fallback import (
@@ -91,6 +92,21 @@ async def test_build_browser_export_plan_includes_all_domains(db: AsyncSession, 
     domains = {item["domain"] for item in items}
     assert domains == {"forms", "surveys", "campaigns", "funnels"}
     assert all(item["steps"] for item in items)
+
+
+@pytest.mark.asyncio
+async def test_build_browser_export_plan_includes_pipelines(db: AsyncSession, location: Location):
+    pipeline = Pipeline(location_id=location.id, name="Sales Pipeline", ghl_id=None)
+    db.add(pipeline)
+    await db.flush()
+    db.add(PipelineStage(pipeline_id=pipeline.id, name="New Lead", position=0, ghl_id=None))
+    db.add(PipelineStage(pipeline_id=pipeline.id, name="Won", position=1, ghl_id=None))
+    await db.commit()
+
+    plan = await build_browser_export_plan(db, location, tab_id=99)
+    domains = {item["domain"] for item in plan["items"]}
+    assert "pipelines" in domains
+    assert plan["summary"]["pipelines"] == 1
 
 
 @pytest.mark.asyncio
@@ -492,6 +508,50 @@ class FakeGHL:
         self.surveys = FakeSurveysAPI()
         self.campaigns = FakeCampaignsAPI()
         self.funnels = FakeFunnelsAPI()
+
+
+class FakeOpportunitiesAPI:
+    async def pipelines(self, location_id: str | None = None):
+        return {
+            "pipelines": [
+                {
+                    "id": "ghl_pipeline_remote",
+                    "name": "Sales Pipeline",
+                    "stages": [
+                        {"id": "ghl_stage_remote_1", "name": "New Lead"},
+                        {"id": "ghl_stage_remote_2", "name": "Won"},
+                    ],
+                }
+            ]
+        }
+
+
+class FakeGHLWithOpportunities:
+    def __init__(self):
+        self.opportunities = FakeOpportunitiesAPI()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_browser_export_ids_updates_pipelines(db: AsyncSession, location: Location):
+    pipeline = Pipeline(location_id=location.id, name="Sales Pipeline", ghl_id=None)
+    db.add(pipeline)
+    await db.flush()
+    stage1 = PipelineStage(pipeline_id=pipeline.id, name="New Lead", position=0, ghl_id=None)
+    stage2 = PipelineStage(pipeline_id=pipeline.id, name="Won", position=1, ghl_id=None)
+    db.add(stage1)
+    db.add(stage2)
+    await db.commit()
+
+    plan = await build_browser_export_plan(db, location, tab_id=7, domains={"pipelines"})
+    ghl = FakeGHLWithOpportunities()
+
+    result = await reconcile_browser_export_ids(db, location, ghl, plan)
+    assert result.errors == []
+
+    refreshed_pipeline = (await db.execute(select(Pipeline))).scalar_one()
+    refreshed_stages = list((await db.execute(select(PipelineStage))).scalars().all())
+    assert refreshed_pipeline.ghl_id == "ghl_pipeline_remote"
+    assert {s.ghl_id for s in refreshed_stages} == {"ghl_stage_remote_1", "ghl_stage_remote_2"}
 
 
 @pytest.mark.asyncio

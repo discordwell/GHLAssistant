@@ -9,10 +9,14 @@
     <div class="bg-white rounded-lg shadow p-6">
         <p class="text-sm text-gray-600 mb-4">The following data will be imported from GHL:</p>
 
-        <div class="grid grid-cols-2 gap-3 mb-6">
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
             <div class="border border-gray-200 rounded p-3">
                 <p class="text-2xl font-bold text-gray-900">{{ preview.contacts }}</p>
                 <p class="text-xs text-gray-500">Contacts</p>
+            </div>
+            <div class="border border-gray-200 rounded p-3">
+                <p class="text-2xl font-bold text-gray-900">{{ preview.opportunities }}</p>
+                <p class="text-xs text-gray-500">Opportunities</p>
             </div>
             <div class="border border-gray-200 rounded p-3">
                 <p class="text-2xl font-bold text-gray-900">{{ preview.tags }}</p>
@@ -23,16 +27,36 @@
                 <p class="text-xs text-gray-500">Custom Fields</p>
             </div>
             <div class="border border-gray-200 rounded p-3">
+                <p class="text-2xl font-bold text-gray-900">{{ preview.custom_values }}</p>
+                <p class="text-xs text-gray-500">Custom Values</p>
+            </div>
+            <div class="border border-gray-200 rounded p-3">
                 <p class="text-2xl font-bold text-gray-900">{{ preview.pipelines }}</p>
                 <p class="text-xs text-gray-500">Pipelines</p>
             </div>
             <div class="border border-gray-200 rounded p-3">
-                <p class="text-2xl font-bold text-gray-900">{{ preview.opportunities }}</p>
-                <p class="text-xs text-gray-500">Opportunities</p>
+                <p class="text-2xl font-bold text-gray-900">{{ preview.conversations }}</p>
+                <p class="text-xs text-gray-500">Conversations</p>
             </div>
             <div class="border border-gray-200 rounded p-3">
-                <p class="text-2xl font-bold text-gray-900">{{ preview.custom_values }}</p>
-                <p class="text-xs text-gray-500">Custom Values</p>
+                <p class="text-2xl font-bold text-gray-900">{{ preview.calendars }}</p>
+                <p class="text-xs text-gray-500">Calendars</p>
+            </div>
+            <div class="border border-gray-200 rounded p-3">
+                <p class="text-2xl font-bold text-gray-900">{{ preview.forms }}</p>
+                <p class="text-xs text-gray-500">Forms</p>
+            </div>
+            <div class="border border-gray-200 rounded p-3">
+                <p class="text-2xl font-bold text-gray-900">{{ preview.surveys }}</p>
+                <p class="text-xs text-gray-500">Surveys</p>
+            </div>
+            <div class="border border-gray-200 rounded p-3">
+                <p class="text-2xl font-bold text-gray-900">{{ preview.campaigns }}</p>
+                <p class="text-xs text-gray-500">Campaigns</p>
+            </div>
+            <div class="border border-gray-200 rounded p-3">
+                <p class="text-2xl font-bold text-gray-900">{{ preview.funnels }}</p>
+                <p class="text-xs text-gray-500">Funnels</p>
             </div>
         </div>
 

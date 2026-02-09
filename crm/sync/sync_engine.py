@@ -16,7 +16,15 @@ from .importer import (
     import_contacts,
     import_opportunities,
 )
-from .exporter import export_tags, export_contacts, export_notes, export_tasks, export_opportunities
+from .exporter import (
+    export_tags,
+    export_custom_fields,
+    export_custom_values,
+    export_contacts,
+    export_notes,
+    export_tasks,
+    export_opportunities,
+)
 from .import_conversations import import_conversations
 from .import_calendars import import_calendars
 from .import_forms import import_forms
@@ -25,8 +33,10 @@ from .import_campaigns import import_campaigns
 from .import_funnels import import_funnels
 from .import_notes import import_notes
 from .import_tasks import import_tasks
+from .import_workflows import import_workflows
 from .export_conversations import export_conversations
 from .export_calendars import export_calendars
+from .export_workflows import export_workflows_via_browser
 from .archive import write_sync_archive
 from .browser_fallback import export_browser_backed_resources
 from ..config import settings
@@ -291,6 +301,54 @@ async def run_import(db: AsyncSession, location: Location) -> SyncResult:
         snap = await snapshot_location(ghl, location_id=lid)
         bp = snap.blueprint
 
+        # 1b. Workflows (raw preservation)
+        try:
+            workflows_resp = await ghl.workflows.list(location_id=lid)
+            workflows_data = workflows_resp.get("workflows", [])
+            if not isinstance(workflows_data, list):
+                workflows_data = []
+
+            details_by_workflow: dict[str, dict] = {}
+            sem = asyncio.Semaphore(10)
+
+            def _extract_id(item: dict) -> str:
+                for key in ("id", "_id"):
+                    value = item.get(key)
+                    if isinstance(value, str) and value:
+                        return value
+                return ""
+
+            async def _one(wid: str):
+                async with sem:
+                    try:
+                        detail = await ghl.workflows.get(wid)
+                    except Exception:
+                        return
+                    if isinstance(detail, dict):
+                        details_by_workflow[wid] = detail
+
+            workflow_ids = [_extract_id(w) for w in workflows_data if isinstance(w, dict)]
+            workflow_ids = [wid for wid in workflow_ids if wid]
+            await asyncio.gather(*(_one(wid) for wid in workflow_ids))
+
+            write_sync_archive(
+                archive_key,
+                "workflows",
+                {"workflows": workflows_data, "details_by_id": details_by_workflow},
+            )
+
+            r = await import_workflows(
+                db,
+                location,
+                [w for w in workflows_data if isinstance(w, dict)],
+                details_by_id=details_by_workflow,
+            )
+            total.created += r.created
+            total.updated += r.updated
+            total.errors.extend(r.errors)
+        except Exception as e:
+            total.errors.append(f"Workflows import error: {e}")
+
         # 2. Tags
         tags_data = [{"id": snap.id_map.get("tags", {}).get(t.name, ""), "name": t.name}
                      for t in bp.tags]
@@ -498,11 +556,16 @@ async def run_import(db: AsyncSession, location: Location) -> SyncResult:
         try:
             cal_resp = await ghl.calendars.list(location_id=lid)
             calendars_data = cal_resp.get("calendars", [])
+            details_by_calendar: dict[str, dict] = {}
             appointments_by_calendar: dict[str, list[dict]] = {}
             for cal in calendars_data:
                 cal_id = cal.get("id", cal.get("_id", ""))
                 if not cal_id:
                     continue
+                try:
+                    details_by_calendar[cal_id] = await ghl.calendars.get(cal_id)
+                except Exception:
+                    details_by_calendar[cal_id] = {}
                 try:
                     appointments_by_calendar[cal_id] = await _paginate_offset(
                         lambda limit, offset: ghl.calendars.get_appointments(
@@ -517,7 +580,11 @@ async def run_import(db: AsyncSession, location: Location) -> SyncResult:
                 except Exception:
                     appointments_by_calendar[cal_id] = []
             r = await import_calendars(
-                db, location, calendars_data, appointments_by_calendar
+                db,
+                location,
+                calendars_data,
+                appointments_by_calendar,
+                details_by_calendar=details_by_calendar,
             )
             total.created += r.created
             total.updated += r.updated
@@ -526,6 +593,7 @@ async def run_import(db: AsyncSession, location: Location) -> SyncResult:
                 "calendars",
                 {
                     "calendars": calendars_data,
+                    "details_by_calendar": details_by_calendar,
                     "appointments_by_calendar": appointments_by_calendar,
                 },
             )
@@ -718,6 +786,19 @@ async def run_export(db: AsyncSession, location: Location) -> SyncResult:
         total.updated += r.updated
         total.errors.extend(r.errors)
 
+        # 1b. Custom fields + custom values (prereqs for contacts/opportunities customFields)
+        r = await export_custom_fields(db, location, ghl)
+        total.created += r.created
+        total.updated += r.updated
+        total.skipped += r.skipped
+        total.errors.extend(r.errors)
+
+        r = await export_custom_values(db, location, ghl)
+        total.created += r.created
+        total.updated += r.updated
+        total.skipped += r.skipped
+        total.errors.extend(r.errors)
+
         # 2. Contacts
         r = await export_contacts(db, location, ghl)
         total.created += r.created
@@ -737,6 +818,31 @@ async def run_export(db: AsyncSession, location: Location) -> SyncResult:
         total.skipped += r.skipped
         total.errors.extend(r.errors)
 
+        # 2c. Pipelines/stages (browser-backed export; prerequisite for opportunities)
+        if settings.sync_browser_fallback_enabled:
+            r = await export_browser_backed_resources(
+                db,
+                location,
+                tab_id=settings.sync_browser_tab_id,
+                domains={"pipelines"},
+                execute=settings.sync_browser_execute_enabled,
+                profile_name=settings.sync_browser_profile,
+                headless=settings.sync_browser_headless,
+                continue_on_error=settings.sync_browser_continue_on_error,
+                max_find_attempts=settings.sync_browser_find_attempts,
+                retry_wait_seconds=settings.sync_browser_step_retry_wait_seconds,
+                require_login=settings.sync_browser_require_login,
+                preflight_url=settings.sync_browser_preflight_url,
+                login_email=settings.sync_browser_login_email,
+                login_password=settings.sync_browser_login_password,
+                login_timeout_seconds=settings.sync_browser_login_timeout_seconds,
+                ghl=ghl,
+            )
+            total.created += r.created
+            total.updated += r.updated
+            total.skipped += r.skipped
+            total.errors.extend(r.errors)
+
         # 3. Opportunities
         r = await export_opportunities(db, location, ghl)
         total.created += r.created
@@ -755,12 +861,38 @@ async def run_export(db: AsyncSession, location: Location) -> SyncResult:
         total.skipped += r.skipped
         total.errors.extend(r.errors)
 
+        # 5b. Workflows (browser-backed rebuild; best-effort)
+        if settings.sync_browser_fallback_enabled:
+            r = await export_workflows_via_browser(
+                db,
+                location,
+                ghl,
+                tab_id=settings.sync_browser_tab_id,
+                fidelity=settings.sync_workflow_fidelity,
+                execute=settings.sync_browser_execute_enabled,
+                profile_name=settings.sync_browser_profile,
+                headless=settings.sync_browser_headless,
+                continue_on_error=settings.sync_browser_continue_on_error,
+                max_find_attempts=settings.sync_browser_find_attempts,
+                retry_wait_seconds=settings.sync_browser_step_retry_wait_seconds,
+                require_login=settings.sync_browser_require_login,
+                preflight_url=settings.sync_browser_preflight_url,
+                login_email=settings.sync_browser_login_email,
+                login_password=settings.sync_browser_login_password,
+                login_timeout_seconds=settings.sync_browser_login_timeout_seconds,
+            )
+            total.created += r.created
+            total.updated += r.updated
+            total.skipped += r.skipped
+            total.errors.extend(r.errors)
+
         # 6. Browser-backed fallback for API-limited resources
         if settings.sync_browser_fallback_enabled:
             r = await export_browser_backed_resources(
                 db,
                 location,
                 tab_id=settings.sync_browser_tab_id,
+                domains={"forms", "surveys", "campaigns", "funnels"},
                 execute=settings.sync_browser_execute_enabled,
                 profile_name=settings.sync_browser_profile,
                 headless=settings.sync_browser_headless,

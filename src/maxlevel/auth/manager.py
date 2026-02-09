@@ -6,6 +6,7 @@ refresh and fallback logic.
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 from dataclasses import dataclass
@@ -191,8 +192,26 @@ class TokenManager:
         if not data.session or not data.session.token:
             return None
 
+        # Session tokens are usually JWTs (captured from browser cookies). If we can
+        # detect an expired JWT, treat it as invalid to avoid confusing 401s.
+        token = data.session.token
+        if isinstance(token, str) and token.count(".") >= 2:
+            try:
+                parts = token.split(".")
+                payload_b64 = parts[1]
+                padding = "=" * ((4 - (len(payload_b64) % 4)) % 4)
+                payload = json.loads(base64.urlsafe_b64decode(payload_b64 + padding))
+                exp = payload.get("exp") if isinstance(payload, dict) else None
+                if isinstance(exp, (int, float)):
+                    now = datetime.now().timestamp()
+                    if int(exp) <= int(now) + 30:
+                        return None
+            except Exception:
+                # If we can't parse it, don't block use.
+                pass
+
         return TokenInfo(
-            token=data.session.token,
+            token=token,
             source="session",
             company_id=data.session.company_id,
             location_id=data.session.location_id,
@@ -214,6 +233,19 @@ class TokenManager:
 
         # Check session
         if data.session and data.session.token:
+            token = data.session.token
+            if isinstance(token, str) and token.count(".") >= 2:
+                try:
+                    parts = token.split(".")
+                    payload_b64 = parts[1]
+                    padding = "=" * ((4 - (len(payload_b64) % 4)) % 4)
+                    payload = json.loads(base64.urlsafe_b64decode(payload_b64 + padding))
+                    exp = payload.get("exp") if isinstance(payload, dict) else None
+                    if isinstance(exp, (int, float)):
+                        now = datetime.now().timestamp()
+                        return int(exp) > int(now) + 30
+                except Exception:
+                    return True
             return True
 
         return False

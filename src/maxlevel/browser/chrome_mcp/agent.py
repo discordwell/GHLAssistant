@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import quote, urlparse, parse_qs
 
 
 @dataclass
@@ -100,10 +101,68 @@ class ChromeMCPAgent:
         Returns:
             MCP command dict for mcp__claude-in-chrome__navigate
         """
+        url = self._normalize_app_url(url)
         return {
             "tool": "mcp__claude-in-chrome__navigate",
             "params": {"url": url, "tabId": self.tab_id},
         }
+
+    def _normalize_app_url(self, url: str) -> str:
+        """Rewrite some GHL app URLs to deep-link form.
+
+        GHL returns 404 for many direct routes like /contacts or /automations.
+        The SPA supports deep linking via `/?url=<encoded_path>`.
+        """
+        if not isinstance(url, str) or not url:
+            return url
+
+        try:
+            parsed = urlparse(url)
+        except Exception:
+            return url
+
+        if parsed.scheme not in {"http", "https"}:
+            return url
+        if parsed.netloc != "app.gohighlevel.com":
+            return url
+
+        # Already root or already deep-linked.
+        if parsed.path in {"", "/"}:
+            qs = parse_qs(parsed.query or "")
+            if "url" in qs:
+                return url
+            return url
+
+        # Don't rewrite obvious static assets.
+        path_l = (parsed.path or "").lower()
+        if any(
+            path_l.endswith(ext)
+            for ext in (
+                ".js",
+                ".css",
+                ".png",
+                ".jpg",
+                ".jpeg",
+                ".gif",
+                ".ico",
+                ".woff",
+                ".woff2",
+                ".ttf",
+                ".svg",
+                ".webp",
+                ".map",
+            )
+        ):
+            return url
+
+        inner = parsed.path
+        if parsed.query:
+            inner += f"?{parsed.query}"
+        if parsed.fragment:
+            inner += f"#{parsed.fragment}"
+
+        # Keep slashes unescaped for readability, but encode query separators.
+        return f"{parsed.scheme}://{parsed.netloc}/?url={quote(inner, safe='/')}"
 
     def screenshot(self) -> dict[str, Any]:
         """Generate screenshot command.

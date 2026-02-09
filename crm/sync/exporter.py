@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from ..models.contact import Contact
 from ..models.custom_field import CustomFieldDefinition, CustomFieldValue
+from ..models.custom_value import CustomValue
 from ..models.tag import Tag
 from ..models.pipeline import Pipeline, PipelineStage
 from ..models.opportunity import Opportunity
@@ -52,6 +53,206 @@ async def export_tags(db: AsyncSession, location: Location, ghl) -> SyncResult:
                 result.created += 1
         except Exception as e:
             result.errors.append(f"Tag '{tag.name}': {e}")
+
+    await db.commit()
+    return result
+
+
+def _normalize_name(value: str | None) -> str:
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.strip().lower().split())
+
+
+def _extract_ghl_id(payload: dict[str, Any] | None) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    for key in ("id", "_id"):
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def _map_custom_field_data_type(local_data_type: str | None) -> str:
+    """Map local data_type (lowercase) to GHL expected dataType."""
+    dt = (local_data_type or "").strip().lower()
+    if dt in {"text", "string"}:
+        return "TEXT"
+    if dt in {"textarea", "longtext"}:
+        return "TEXTAREA"
+    if dt in {"number", "numeric", "float", "int"}:
+        return "NUMBER"
+    if dt in {"date", "datetime"}:
+        return "DATE"
+    if dt in {"boolean", "bool", "checkbox"}:
+        return "CHECKBOX"
+    if dt in {"select", "dropdown", "picklist"}:
+        return "DROPDOWN"
+    return (local_data_type or "TEXT").upper()
+
+
+async def export_custom_fields(db: AsyncSession, location: Location, ghl) -> SyncResult:
+    """Export local custom field definitions to GHL (API-backed)."""
+    result = SyncResult()
+    now = datetime.now(timezone.utc)
+
+    stmt = (
+        select(CustomFieldDefinition)
+        .where(CustomFieldDefinition.location_id == location.id)
+        .order_by(CustomFieldDefinition.position.asc(), CustomFieldDefinition.created_at.asc())
+    )
+    defs = list((await db.execute(stmt)).scalars().all())
+    if not defs:
+        return result
+
+    remote_fields: list[dict[str, Any]] = []
+    if getattr(location, "ghl_location_id", None):
+        try:
+            resp = await ghl.custom_fields.list(location_id=location.ghl_location_id)
+            raw = resp.get("customFields", [])
+            if isinstance(raw, list):
+                remote_fields = [item for item in raw if isinstance(item, dict)]
+        except Exception as exc:
+            result.errors.append(f"Custom fields list failed: {exc}")
+
+    remote_by_field_key: dict[str, dict[str, Any]] = {}
+    remote_by_name: dict[str, dict[str, Any]] = {}
+    for remote in remote_fields:
+        field_key = remote.get("fieldKey")
+        if isinstance(field_key, str) and field_key and field_key not in remote_by_field_key:
+            remote_by_field_key[field_key] = remote
+        name_key = _normalize_name(str(remote.get("name", "")))
+        if name_key and name_key not in remote_by_name:
+            remote_by_name[name_key] = remote
+
+    for defn in defs:
+        try:
+            # Best-effort reconcile missing IDs by fieldKey, then by name.
+            if not defn.ghl_id:
+                remote = None
+                if isinstance(defn.field_key, str) and defn.field_key:
+                    remote = remote_by_field_key.get(defn.field_key)
+                if remote is None:
+                    remote = remote_by_name.get(_normalize_name(defn.name))
+                remote_id = _extract_ghl_id(remote)
+                if remote_id:
+                    defn.ghl_id = remote_id
+                    defn.ghl_location_id = location.ghl_location_id
+                    defn.last_synced_at = now
+                    result.updated += 1
+                    continue
+
+            data_type = _map_custom_field_data_type(defn.data_type)
+            placeholder = None
+            if isinstance(defn.options_json, dict):
+                placeholder = defn.options_json.get("placeholder")
+                if not isinstance(placeholder, str):
+                    placeholder = None
+
+            if defn.ghl_id:
+                await ghl.custom_fields.update(
+                    defn.ghl_id,
+                    name=defn.name,
+                    placeholder=placeholder,
+                    position=defn.position,
+                    location_id=location.ghl_location_id,
+                )
+                defn.last_synced_at = now
+                result.updated += 1
+            else:
+                resp = await ghl.custom_fields.create(
+                    name=defn.name,
+                    field_key=defn.field_key,
+                    data_type=data_type,
+                    placeholder=placeholder,
+                    position=defn.position,
+                    location_id=location.ghl_location_id,
+                )
+                payload = resp.get("customField", resp) if isinstance(resp, dict) else {}
+                remote_id = _extract_ghl_id(payload)
+                if not remote_id:
+                    result.errors.append(f"Custom field '{defn.field_key}': created but no id returned")
+                    continue
+                defn.ghl_id = remote_id
+                defn.ghl_location_id = location.ghl_location_id
+                defn.last_synced_at = now
+                result.created += 1
+        except Exception as exc:
+            result.errors.append(f"Custom field '{getattr(defn, 'field_key', defn.id)}': {exc}")
+
+    await db.commit()
+    return result
+
+
+async def export_custom_values(db: AsyncSession, location: Location, ghl) -> SyncResult:
+    """Export local custom values to GHL (API-backed)."""
+    result = SyncResult()
+    now = datetime.now(timezone.utc)
+
+    stmt = (
+        select(CustomValue)
+        .where(CustomValue.location_id == location.id)
+        .order_by(CustomValue.created_at.asc())
+    )
+    values = list((await db.execute(stmt)).scalars().all())
+    if not values:
+        return result
+
+    remote_values: list[dict[str, Any]] = []
+    if getattr(location, "ghl_location_id", None):
+        try:
+            resp = await ghl.custom_values.list(location_id=location.ghl_location_id)
+            raw = resp.get("customValues", [])
+            if isinstance(raw, list):
+                remote_values = [item for item in raw if isinstance(item, dict)]
+        except Exception as exc:
+            result.errors.append(f"Custom values list failed: {exc}")
+
+    remote_by_name: dict[str, dict[str, Any]] = {}
+    for remote in remote_values:
+        name_key = _normalize_name(str(remote.get("name", "")))
+        if name_key and name_key not in remote_by_name:
+            remote_by_name[name_key] = remote
+
+    for cv in values:
+        try:
+            if not cv.ghl_id:
+                remote = remote_by_name.get(_normalize_name(cv.name))
+                remote_id = _extract_ghl_id(remote)
+                if remote_id:
+                    cv.ghl_id = remote_id
+                    cv.ghl_location_id = location.ghl_location_id
+                    cv.last_synced_at = now
+                    result.updated += 1
+                    continue
+
+            if cv.ghl_id:
+                await ghl.custom_values.update(
+                    cv.ghl_id,
+                    name=cv.name,
+                    value=cv.value or "",
+                    location_id=location.ghl_location_id,
+                )
+                cv.last_synced_at = now
+                result.updated += 1
+            else:
+                resp = await ghl.custom_values.create(
+                    name=cv.name,
+                    value=cv.value or "",
+                    location_id=location.ghl_location_id,
+                )
+                payload = resp.get("customValue", resp) if isinstance(resp, dict) else {}
+                remote_id = _extract_ghl_id(payload)
+                if not remote_id:
+                    result.errors.append(f"Custom value '{cv.name}': created but no id returned")
+                    continue
+                cv.ghl_id = remote_id
+                cv.ghl_location_id = location.ghl_location_id
+                cv.last_synced_at = now
+                result.created += 1
+        except Exception as exc:
+            result.errors.append(f"Custom value '{getattr(cv, 'name', cv.id)}': {exc}")
 
     await db.commit()
     return result
@@ -224,6 +425,50 @@ async def export_opportunities(db: AsyncSession, location: Location, ghl) -> Syn
     )
     opps = list((await db.execute(stmt)).scalars().all())
 
+    def _norm(value: str | None) -> str:
+        if not isinstance(value, str):
+            return ""
+        return " ".join(value.strip().lower().split())
+
+    def _extract_id(payload: dict[str, Any] | None) -> str:
+        if not isinstance(payload, dict):
+            return ""
+        for key in ("id", "_id"):
+            val = payload.get(key)
+            if isinstance(val, str) and val:
+                return val
+        return ""
+
+    # If any local pipeline/stage rows are missing GHL IDs, attempt best-effort
+    # mapping to existing remote pipelines by name before exporting.
+    pipelines_by_name: dict[str, dict[str, Any]] = {}
+    pipelines_by_id: dict[str, dict[str, Any]] = {}
+    needs_pipeline_mapping = any(
+        (getattr(opp, "pipeline", None) and not getattr(opp.pipeline, "ghl_id", None))
+        or (getattr(opp, "stage", None) and not getattr(opp.stage, "ghl_id", None))
+        for opp in opps
+    )
+    if needs_pipeline_mapping and getattr(location, "ghl_location_id", None):
+        try:
+            resp = await ghl.opportunities.pipelines(location_id=location.ghl_location_id)
+            remote = resp.get("pipelines", resp)
+            remote_pipelines = remote if isinstance(remote, list) else resp.get("pipelines", [])
+            if not isinstance(remote_pipelines, list):
+                remote_pipelines = []
+        except Exception as exc:
+            remote_pipelines = []
+            result.errors.append(f"Opportunity export: pipeline list failed: {exc}")
+
+        for p in remote_pipelines:
+            if not isinstance(p, dict):
+                continue
+            pid = _extract_id(p)
+            if pid and pid not in pipelines_by_id:
+                pipelines_by_id[pid] = p
+            name_key = _norm(str(p.get("name", "")))
+            if name_key and name_key not in pipelines_by_name:
+                pipelines_by_name[name_key] = p
+
     # Preload opportunity custom field values and group by local opportunity UUID.
     custom_fields_by_entity: dict = {}
     cf_stmt = (
@@ -240,6 +485,44 @@ async def export_opportunities(db: AsyncSession, location: Location, ghl) -> Syn
 
     for opp in opps:
         ghl_data = local_opportunity_to_ghl(opp)
+
+        # Best-effort: fill in missing pipeline/stage GHL IDs by name matching.
+        remote_pipeline: dict[str, Any] | None = None
+        if getattr(opp, "pipeline", None) is not None and not getattr(opp.pipeline, "ghl_id", None):
+            remote_pipeline = pipelines_by_name.get(_norm(getattr(opp.pipeline, "name", "")))
+            remote_id = _extract_id(remote_pipeline)
+            if remote_id:
+                opp.pipeline.ghl_id = remote_id
+                opp.pipeline.ghl_location_id = location.ghl_location_id
+                opp.pipeline.last_synced_at = datetime.now(timezone.utc)
+
+        if getattr(opp, "pipeline", None) is not None and getattr(opp.pipeline, "ghl_id", None):
+            remote_pipeline = pipelines_by_id.get(str(opp.pipeline.ghl_id)) or remote_pipeline
+
+        if getattr(opp, "stage", None) is not None and not getattr(opp.stage, "ghl_id", None) and remote_pipeline:
+            remote_stages_raw = remote_pipeline.get("stages", [])
+            remote_stages: list[dict[str, Any]] = (
+                [s for s in remote_stages_raw if isinstance(s, dict)]
+                if isinstance(remote_stages_raw, list)
+                else []
+            )
+            stage_by_name: dict[str, dict[str, Any]] = {}
+            for s in remote_stages:
+                key = _norm(str(s.get("name", "")))
+                if key and key not in stage_by_name:
+                    stage_by_name[key] = s
+
+            remote_stage = stage_by_name.get(_norm(getattr(opp.stage, "name", "")))
+            if remote_stage is None:
+                try:
+                    remote_stage = remote_stages[int(getattr(opp.stage, "position", 0))]
+                except Exception:
+                    remote_stage = None
+            remote_stage_id = _extract_id(remote_stage)
+            if remote_stage_id:
+                opp.stage.ghl_id = remote_stage_id
+                opp.stage.ghl_location_id = location.ghl_location_id
+                opp.stage.last_synced_at = datetime.now(timezone.utc)
 
         # Map pipeline and stage by ghl_id
         if opp.pipeline and opp.pipeline.ghl_id:
