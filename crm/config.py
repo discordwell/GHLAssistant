@@ -38,11 +38,40 @@ class CRMSettings(BaseSettings):
     sync_browser_login_timeout_seconds: int = 120
     sync_workflow_fidelity: int = 2
 
+    # Assets (media library + attachments)
+    sync_assets_enabled: bool = True
+    # Media Library can be huge; keep off by default unless explicitly enabled.
+    sync_assets_import_media_library: bool = False
+    sync_assets_media_library_page_size: int = 200
+    sync_assets_media_library_max_pages: int = 25
+    # Archiving full media library listings can create massive files; default to summary-only.
+    sync_assets_media_library_archive_full: bool = False
+    sync_assets_media_library_archive_sample: int = 50
+    sync_assets_download_during_import: bool = False
+    sync_assets_download_limit: int = 200
+
+    asset_blobstore_dir: str = "data/blobstore"
+
     model_config = {"env_prefix": "CRM_", "env_file": ".env", "extra": "ignore"}
 
     @property
     def base_dir(self) -> Path:
         return Path(__file__).resolve().parent
+
+    @property
+    def project_dir(self) -> Path:
+        return self.base_dir.parent
+
+    @property
+    def data_dir(self) -> Path:
+        return self.project_dir / "data"
+
+    @property
+    def blobstore_dir(self) -> Path:
+        path = Path(self.asset_blobstore_dir)
+        if not path.is_absolute():
+            path = self.project_dir / path
+        return path
 
     @property
     def templates_dir(self) -> Path:

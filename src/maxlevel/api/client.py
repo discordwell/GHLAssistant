@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from .campaigns import CampaignsAPI
     from .surveys import SurveysAPI
     from .funnels import FunnelsAPI
+    from .media_library import MediaLibraryAPI
     from .conversation_ai import ConversationAIAPI
     from .voice_ai import VoiceAIAPI
     from .agency import AgencyAPI
@@ -182,6 +183,7 @@ class GHLClient:
         self._campaigns: CampaignsAPI | None = None
         self._surveys: SurveysAPI | None = None
         self._funnels: FunnelsAPI | None = None
+        self._media_library: MediaLibraryAPI | None = None
         self._conversation_ai: ConversationAIAPI | None = None
         self._voice_ai: VoiceAIAPI | None = None
         self._agency: AgencyAPI | None = None
@@ -296,6 +298,7 @@ class GHLClient:
         from .campaigns import CampaignsAPI
         from .surveys import SurveysAPI
         from .funnels import FunnelsAPI
+        from .media_library import MediaLibraryAPI
         from .conversation_ai import ConversationAIAPI
         from .voice_ai import VoiceAIAPI
         from .agency import AgencyAPI
@@ -312,6 +315,7 @@ class GHLClient:
         self._campaigns = CampaignsAPI(self)
         self._surveys = SurveysAPI(self)
         self._funnels = FunnelsAPI(self)
+        self._media_library = MediaLibraryAPI(self)
         self._conversation_ai = ConversationAIAPI(self)
         self._voice_ai = VoiceAIAPI(self)
         self._agency = AgencyAPI(self)
@@ -415,6 +419,13 @@ class GHLClient:
         if not self._funnels:
             raise RuntimeError("Client not initialized. Use 'async with' context.")
         return self._funnels
+
+    @property
+    def media_library(self) -> "MediaLibraryAPI":
+        """Media Library API (best-effort; internal endpoints)."""
+        if not self._media_library:
+            raise RuntimeError("Client not initialized. Use 'async with' context.")
+        return self._media_library
 
     @property
     def conversation_ai(self) -> "ConversationAIAPI":

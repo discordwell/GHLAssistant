@@ -20,6 +20,7 @@ class ImportPreview(BaseModel):
     surveys: int = 0
     campaigns: int = 0
     funnels: int = 0
+    media_library_files: int = 0
 
 
 class SyncResult(BaseModel):

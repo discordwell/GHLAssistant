@@ -36,6 +36,7 @@ from .custom_values import CustomValuesAPI
 from .campaigns import CampaignsAPI
 from .surveys import SurveysAPI
 from .funnels import FunnelsAPI
+from .media_library import MediaLibraryAPI
 from .conversation_ai import ConversationAIAPI
 from .voice_ai import VoiceAIAPI
 from .agency import AgencyAPI
@@ -55,6 +56,7 @@ __all__ = [
     "CampaignsAPI",
     "SurveysAPI",
     "FunnelsAPI",
+    "MediaLibraryAPI",
     "ConversationAIAPI",
     "VoiceAIAPI",
     "AgencyAPI",

@@ -18,6 +18,7 @@ from .survey import Survey, SurveyQuestion, SurveySubmission
 from .campaign import Campaign, CampaignStep, CampaignEnrollment
 from .funnel import Funnel, FunnelPage
 from .ghl_raw import GHLRawEntity
+from .asset import Asset, AssetRef, AssetJob, AssetRemoteMap
 
 __all__ = [
     "Base",
@@ -55,4 +56,8 @@ __all__ = [
     "Funnel",
     "FunnelPage",
     "GHLRawEntity",
+    "Asset",
+    "AssetRef",
+    "AssetJob",
+    "AssetRemoteMap",
 ]

@@ -34,6 +34,7 @@ from .import_funnels import import_funnels
 from .import_notes import import_notes
 from .import_tasks import import_tasks
 from .import_workflows import import_workflows
+from .import_media_library import import_media_library
 from .export_conversations import export_conversations
 from .export_calendars import export_calendars
 from .export_workflows import export_workflows_via_browser
@@ -284,6 +285,13 @@ async def preview_import(ghl_location_id: str) -> ImportPreview:
             preview.funnels = len(funnel_resp.get("funnels", []))
         except Exception:
             pass
+
+        # Count media library files (best-effort; internal endpoints may vary)
+        try:
+            items = await ghl.media_library.list_all_files(location_id=ghl_location_id, page_size=50, max_pages=2)
+            preview.media_library_files = len(items)
+        except Exception:
+            preview.media_library_files = 0
 
     return preview
 
@@ -552,6 +560,18 @@ async def run_import(db: AsyncSession, location: Location) -> SyncResult:
         except Exception as e:
             total.errors.append(f"Conversations import error: {e}")
 
+        # 8b. Assets: discover conversation/message attachments from raw payloads (best-effort)
+        try:
+            from .import_assets import discover_conversation_message_attachments_from_raw
+            ar = await discover_conversation_message_attachments_from_raw(db, location)
+            if ar.refs_created or ar.jobs_created:
+                total.errors.append(
+                    f"INFO: Assets discovered {ar.refs_created} ref(s), queued {ar.jobs_created} download job(s) from raw conversations/messages"
+                )
+            total.errors.extend(ar.errors)
+        except Exception as e:
+            total.errors.append(f"Assets discovery error (raw conversations/messages): {e}")
+
         # 9. Calendars
         try:
             cal_resp = await ghl.calendars.list(location_id=lid)
@@ -769,8 +789,74 @@ async def run_import(db: AsyncSession, location: Location) -> SyncResult:
                     "page_details_by_funnel": page_details_by_funnel,
                 },
             )
+
+            # 13b. Assets: discover funnel page HTML references (best-effort)
+            try:
+                from .import_assets import discover_funnel_page_html_assets
+                ar = await discover_funnel_page_html_assets(db, location)
+                if ar.refs_created or ar.jobs_created or ar.assets_created:
+                    total.errors.append(
+                        "INFO: Funnel page assets discovered "
+                        f"{ar.refs_created} ref(s), {ar.assets_created} embedded asset(s), "
+                        f"queued {ar.jobs_created} download job(s)"
+                    )
+                total.errors.extend(ar.errors)
+            except Exception as e:
+                total.errors.append(f"Assets discovery error (funnel page HTML): {e}")
         except Exception as e:
             total.errors.append(f"Funnels import error: {e}")
+
+        # 14. Media library (best-effort, internal endpoints)
+        if settings.sync_assets_enabled and settings.sync_assets_import_media_library:
+            try:
+                page_size = int(settings.sync_assets_media_library_page_size or 200)
+                max_pages = int(settings.sync_assets_media_library_max_pages or 0)
+                if max_pages <= 0:
+                    max_pages = 25
+
+                media_items = await ghl.media_library.list_all_files(
+                    location_id=lid,
+                    page_size=page_size,
+                    max_pages=max_pages,
+                )
+
+                # Avoid writing massive sync archives by default. Raw payloads are
+                # already preserved into `ghl_raw_entity` during import.
+                archive_payload: dict[str, Any] = {
+                    "count": len(media_items),
+                    "page_size": page_size,
+                    "max_pages": max_pages,
+                }
+                if settings.sync_assets_media_library_archive_full:
+                    archive_payload["items"] = media_items
+                else:
+                    sample_n = max(0, int(settings.sync_assets_media_library_archive_sample or 0))
+                    if sample_n:
+                        archive_payload["items_sample"] = media_items[:sample_n]
+                write_sync_archive(archive_key, "media_library", archive_payload)
+
+                r = await import_media_library(db, location=location, items=media_items, source="api")
+                total.created += r.created
+                total.updated += r.updated
+                total.errors.extend(r.errors)
+
+                # Optional: run downloads during import (default off; can be slow).
+                if settings.sync_assets_download_during_import and media_items:
+                    from ..assets.jobs import process_download_jobs
+
+                    stats = await process_download_jobs(
+                        db,
+                        location_id=location.id,
+                        blobstore_dir=str(settings.blobstore_dir),
+                        limit=int(settings.sync_assets_download_limit or 0),
+                        worker_id=f"sync-import:{location.slug}",
+                    )
+                    if stats.failed:
+                        total.errors.append(
+                            f"Assets download jobs: {stats.succeeded} ok, {stats.failed} failed"
+                        )
+            except Exception as e:
+                total.errors.append(f"Media library import error: {e}")
 
     return total
 

@@ -25,3 +25,6 @@ data/browser_profiles/
 data/network_logs/
 data/screenshots/
 data/sync_archives/
+
+# Asset blobstore (downloaded bytes; rebuildable)
+data/blobstore/
