@@ -466,9 +466,39 @@ async def run_import(db: AsyncSession, location: Location) -> SyncResult:
 
             return out
 
+        # Prefer services.leadconnectorhq.com Notes/Tasks endpoints when we have `token-id`.
+        # This avoids known backend inconsistencies in some accounts.
+        use_services_notes = False
+        use_services_tasks = False
+        if isinstance(getattr(ghl.config, "token_id", None), str) and ghl.config.token_id and contact_ids:
+            try:
+                await ghl.notes_service.list_by_contact(
+                    contact_ids[0],
+                    location_id=lid,
+                    page_size=1,
+                    max_pages=1,
+                )
+                use_services_notes = True
+            except Exception:
+                use_services_notes = False
+            try:
+                await ghl.tasks_service.list_by_contact(
+                    contact_ids[0],
+                    location_id=lid,
+                    page_limit=1,
+                    max_pages=1,
+                )
+                use_services_tasks = True
+            except Exception:
+                use_services_tasks = False
+
         try:
             notes_by_contact = await _fetch_by_contact(
-                lambda cid: ghl.contacts.get_notes(cid, location_id=lid),
+                (
+                    (lambda cid: ghl.notes_service.list_by_contact(cid, location_id=lid))
+                    if use_services_notes
+                    else (lambda cid: ghl.contacts.get_notes(cid, location_id=lid))
+                ),
                 "notes",
             )
         except Exception as e:
@@ -484,7 +514,11 @@ async def run_import(db: AsyncSession, location: Location) -> SyncResult:
 
         try:
             tasks_by_contact = await _fetch_by_contact(
-                lambda cid: ghl.contacts.get_tasks(cid, location_id=lid),
+                (
+                    (lambda cid: ghl.tasks_service.list_by_contact(cid, location_id=lid))
+                    if use_services_tasks
+                    else (lambda cid: ghl.contacts.get_tasks(cid, location_id=lid))
+                ),
                 "tasks",
             )
         except Exception as e:

@@ -252,7 +252,10 @@ class BrowserAgent:
         # Location-scoped routes generally work as direct paths and should not be
         # rewritten to deep-link form (doing so can trigger redirects back to the
         # agency launchpad for some accounts).
-        if parsed.path.startswith("/location/"):
+        #
+        # Important: GHL uses multiple SPA "versions" under /v2/location/... etc.
+        # Those routes also break when rewritten to /?url=... for some accounts.
+        if parsed.path.startswith("/location/") or parsed.path.startswith("/v2/location/"):
             return url
 
         # Already on root (including existing deep links like /?url=...).

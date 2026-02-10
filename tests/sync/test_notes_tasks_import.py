@@ -93,6 +93,34 @@ async def test_import_notes_creates_and_updates(db: AsyncSession, location: Loca
 
 
 @pytest.mark.asyncio
+async def test_import_notes_created_by_dict(db: AsyncSession, location: Location):
+    contact = Contact(location_id=location.id, ghl_id="ghl-c-1", first_name="Alice")
+    db.add(contact)
+    await db.commit()
+    await db.refresh(contact)
+
+    notes_by_contact = {
+        "ghl-c-1": [
+            {
+                "id": "ghl-note-2",
+                "body": "Hello",
+                "createdBy": {"name": "Tester Name", "userId": "tester-id"},
+            }
+        ],
+    }
+    result = await import_notes(db, location, notes_by_contact, contact_map={"ghl-c-1": contact.id})
+    assert result.created == 1
+
+    note = (
+        await db.scalar(
+            select(Note).where(Note.location_id == location.id, Note.ghl_id == "ghl-note-2")
+        )
+    )
+    assert note is not None
+    assert note.created_by == "Tester Name"
+
+
+@pytest.mark.asyncio
 async def test_import_tasks_creates_and_parses_due_date(db: AsyncSession, location: Location):
     contact = Contact(location_id=location.id, ghl_id="ghl-c-1", first_name="Alice")
     db.add(contact)
@@ -142,6 +170,57 @@ async def test_import_tasks_creates_and_parses_due_date(db: AsyncSession, locati
 
 
 @pytest.mark.asyncio
+async def test_import_tasks_services_object_record(db: AsyncSession, location: Location):
+    contact = Contact(location_id=location.id, ghl_id="ghl-c-1", first_name="Alice")
+    db.add(contact)
+    await db.commit()
+    await db.refresh(contact)
+
+    tasks_by_contact = {
+        "ghl-c-1": [
+            {
+                "id": "ghl-task-s-1",
+                "properties": {
+                    "title": "Call back",
+                    "description": "Follow up",
+                    "dueDate": "2026-02-08T10:00:00Z",
+                    "completed": True,
+                    "priority": 3,
+                    "assignedTo": "tester",
+                },
+            }
+        ]
+    }
+    result = await import_tasks(db, location, tasks_by_contact, contact_map={"ghl-c-1": contact.id})
+    assert result.created == 1
+
+    task = (
+        await db.scalar(
+            select(Task).where(Task.location_id == location.id, Task.ghl_id == "ghl-task-s-1")
+        )
+    )
+    assert task is not None
+    assert task.title == "Call back"
+    assert task.description == "Follow up"
+    assert task.due_date == date(2026, 2, 8)
+    assert task.status == "done"
+    assert task.priority == 3
+    assert task.assigned_to == "tester"
+    assert task.contact_id == contact.id
+
+    raw = (
+        await db.scalar(
+            select(GHLRawEntity).where(
+                GHLRawEntity.location_id == location.id,
+                GHLRawEntity.entity_type == "task",
+                GHLRawEntity.ghl_id == "ghl-task-s-1",
+            )
+        )
+    )
+    assert raw is not None
+
+
+@pytest.mark.asyncio
 async def test_import_tasks_allows_orphaned_contact(db: AsyncSession, location: Location):
     tasks_by_contact = {
         "ghl-missing-contact": [{"id": "ghl-task-orphan", "title": "Orphan Task"}],
@@ -156,4 +235,3 @@ async def test_import_tasks_allows_orphaned_contact(db: AsyncSession, location: 
     )
     assert task is not None
     assert task.contact_id is None
-

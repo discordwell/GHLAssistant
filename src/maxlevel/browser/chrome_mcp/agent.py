@@ -128,7 +128,7 @@ class ChromeMCPAgent:
 
         # Location-scoped routes generally work as direct paths and should not be
         # rewritten to deep-link form (doing so can trigger redirects for some accounts).
-        if parsed.path.startswith("/location/"):
+        if parsed.path.startswith("/location/") or parsed.path.startswith("/v2/location/"):
             return url
 
         # Already root or already deep-linked.

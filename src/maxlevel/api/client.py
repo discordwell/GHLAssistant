@@ -10,6 +10,7 @@ Supports two authentication methods:
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,10 +32,83 @@ if TYPE_CHECKING:
     from .surveys import SurveysAPI
     from .funnels import FunnelsAPI
     from .media_library import MediaLibraryAPI
+    from .notes_service import NotesServiceAPI
+    from .tasks_service import TasksServiceAPI
     from .conversation_ai import ConversationAIAPI
     from .voice_ai import VoiceAIAPI
     from .agency import AgencyAPI
     from ..auth.manager import TokenManager
+
+
+def _session_logs_dir() -> Path | None:
+    """Best-effort locate repo-local network logs (gitignored)."""
+    # Running from repo: <root>/src/maxlevel/api/client.py
+    try:
+        root = Path(__file__).resolve().parents[3]
+        candidate = root / "data" / "network_logs"
+        if candidate.is_dir():
+            return candidate
+    except Exception:
+        pass
+
+    # Fallback: relative to CWD.
+    try:
+        candidate = Path.cwd() / "data" / "network_logs"
+        if candidate.is_dir():
+            return candidate
+    except Exception:
+        pass
+
+    return None
+
+
+def _scan_token_id_from_session_data(data: dict[str, Any]) -> str | None:
+    auth_block = data.get("auth") or {}
+    if isinstance(auth_block, dict):
+        tok = auth_block.get("token_id")
+        if isinstance(tok, str) and tok.strip():
+            return tok.strip()
+
+    # Best-effort: scan captured headers for `token-id`.
+    def _scan(items: list[dict]) -> str | None:
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            headers = item.get("headers") or {}
+            if not isinstance(headers, dict):
+                continue
+            for k, v in headers.items():
+                if isinstance(k, str) and k.lower() == "token-id" and isinstance(v, str) and v.strip():
+                    return v.strip()
+        return None
+
+    api_calls = data.get("api_calls", []) or []
+    if isinstance(api_calls, list):
+        tok = _scan([i for i in api_calls if isinstance(i, dict)])
+        if tok:
+            return tok
+
+    network_log = data.get("network_log", []) or []
+    if isinstance(network_log, list):
+        tok = _scan([i for i in network_log if isinstance(i, dict)])
+        if tok:
+            return tok
+
+    return None
+
+
+def _scan_token_id_from_session_file(filepath: str | Path) -> str | None:
+    try:
+        raw = Path(filepath).read_text(encoding="utf-8")
+    except Exception:
+        return None
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return _scan_token_id_from_session_data(data)
 
 
 @dataclass
@@ -84,24 +158,7 @@ class GHLConfig:
         if not token:
             raise ValueError("No access token found in session file")
 
-        token_id = auth_block.get("token_id") if isinstance(auth_block, dict) else None
-        token_id = token_id or None
-
-        if not token_id:
-            # Best-effort: scan captured headers for `token-id`.
-            def _scan(items: list[dict]) -> str | None:
-                for item in items:
-                    if not isinstance(item, dict):
-                        continue
-                    headers = item.get("headers") or {}
-                    if not isinstance(headers, dict):
-                        continue
-                    for k, v in headers.items():
-                        if isinstance(k, str) and k.lower() == "token-id" and isinstance(v, str) and v.strip():
-                            return v.strip()
-                return None
-
-            token_id = _scan(data.get("api_calls", []) or []) or _scan(data.get("network_log", []) or [])
+        token_id = _scan_token_id_from_session_data(data)
 
         # Extract IDs from auth blocks and API calls
         user_id = None
@@ -232,9 +289,45 @@ class GHLClient:
         self._surveys: SurveysAPI | None = None
         self._funnels: FunnelsAPI | None = None
         self._media_library: MediaLibraryAPI | None = None
+        self._notes_service: NotesServiceAPI | None = None
+        self._tasks_service: TasksServiceAPI | None = None
         self._conversation_ai: ConversationAIAPI | None = None
         self._voice_ai: VoiceAIAPI | None = None
         self._agency: AgencyAPI | None = None
+
+    def _best_effort_token_id(self) -> str | None:
+        """Infer `token-id` (Firebase ID token) from env, stored session file, or recent logs."""
+        override = os.environ.get("MAXLEVEL_TOKEN_ID")
+        if isinstance(override, str) and override.strip():
+            return override.strip()
+
+        # TokenManager may remember the session file path.
+        if self._token_manager:
+            try:
+                storage = self._token_manager.storage.load()
+                session_file = storage.session.session_file if storage.session else None
+                if isinstance(session_file, str) and session_file:
+                    tok = _scan_token_id_from_session_file(session_file)
+                    if tok:
+                        return tok
+            except Exception:
+                pass
+
+        log_dir = _session_logs_dir()
+        if not log_dir:
+            return None
+
+        sessions = sorted(
+            log_dir.glob("session_*.json"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )[:10]
+        for path in sessions:
+            tok = _scan_token_id_from_session_file(path)
+            if tok:
+                return tok
+
+        return None
 
     @classmethod
     def from_session(cls, filepath: str | Path | None = None) -> "GHLClient":
@@ -322,6 +415,13 @@ class GHLClient:
             )
             self._needs_token_init = False
 
+        # Best-effort: infer `token-id` for services.* endpoints (notes/tasks/media library).
+        if not self.config.token_id:
+            try:
+                self.config.token_id = self._best_effort_token_id()
+            except Exception:
+                pass
+
         self._client = httpx.AsyncClient(
             base_url=self.BASE_URL,
             timeout=30.0,
@@ -347,6 +447,8 @@ class GHLClient:
         from .surveys import SurveysAPI
         from .funnels import FunnelsAPI
         from .media_library import MediaLibraryAPI
+        from .notes_service import NotesServiceAPI
+        from .tasks_service import TasksServiceAPI
         from .conversation_ai import ConversationAIAPI
         from .voice_ai import VoiceAIAPI
         from .agency import AgencyAPI
@@ -364,6 +466,8 @@ class GHLClient:
         self._surveys = SurveysAPI(self)
         self._funnels = FunnelsAPI(self)
         self._media_library = MediaLibraryAPI(self)
+        self._notes_service = NotesServiceAPI(self)
+        self._tasks_service = TasksServiceAPI(self)
         self._conversation_ai = ConversationAIAPI(self)
         self._voice_ai = VoiceAIAPI(self)
         self._agency = AgencyAPI(self)
@@ -474,6 +578,20 @@ class GHLClient:
         if not self._media_library:
             raise RuntimeError("Client not initialized. Use 'async with' context.")
         return self._media_library
+
+    @property
+    def notes_service(self) -> "NotesServiceAPI":
+        """Notes API via services.leadconnectorhq.com (requires token-id)."""
+        if not self._notes_service:
+            raise RuntimeError("Client not initialized. Use 'async with' context.")
+        return self._notes_service
+
+    @property
+    def tasks_service(self) -> "TasksServiceAPI":
+        """Tasks API via services.leadconnectorhq.com (requires token-id)."""
+        if not self._tasks_service:
+            raise RuntimeError("Client not initialized. Use 'async with' context.")
+        return self._tasks_service
 
     @property
     def conversation_ai(self) -> "ConversationAIAPI":
