@@ -26,6 +26,12 @@ def _extract_ghl_id(payload: dict) -> str:
 def _extract_created_by(payload: dict) -> str | None:
     for key in ("createdBy", "createdByName", "createdById", "user", "userId"):
         value = payload.get(key)
+        if isinstance(value, dict):
+            # services.leadconnectorhq.com notes use a dict-shaped createdBy.
+            for sub_key in ("name", "userId", "id", "email"):
+                sub_val = value.get(sub_key)
+                if isinstance(sub_val, str) and sub_val.strip():
+                    return sub_val.strip()
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
@@ -121,4 +127,3 @@ async def import_notes(
 
     await db.commit()
     return result
-

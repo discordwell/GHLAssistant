@@ -75,6 +75,39 @@ def _build_click_by_text_js(label: str) -> str:
 """
 
 
+def _build_click_by_selector_js(selector: str) -> str:
+    selector_json = json.dumps(selector)
+    return f"""
+(() => {{
+  const sel = String({selector_json} || "").trim();
+  if (!sel) return {{ success: false, reason: "empty_selector" }};
+
+  const el = document.querySelector(sel);
+  if (!el) return {{ success: false, reason: "not_found", selector: sel }};
+
+  function textOf(node) {{
+    return ((node.innerText || node.textContent || node.getAttribute?.("aria-label") || node.getAttribute?.("title") || "") + "")
+      .trim();
+  }}
+
+  try {{ el.scrollIntoView({{ behavior: "auto", block: "center" }}); }} catch (e) {{}}
+  try {{ if (typeof el.focus === "function") el.focus(); }} catch (e) {{}}
+  try {{ if (typeof el.click === "function") el.click(); }} catch (e) {{
+    return {{ success: false, reason: String(e), selector: sel }};
+  }}
+
+  return {{
+    success: true,
+    selector: sel,
+    tag: el.tagName || "",
+    id: el.id || null,
+    role: el.getAttribute?.("role") || null,
+    text: textOf(el).slice(0, 120)
+  }};
+}})()
+"""
+
+
 async def capture_contact_page(*, profile: str, headless: bool) -> dict:
     """Navigate to GHL contact page and capture Notes/Tasks structure."""
     
@@ -217,7 +250,8 @@ async def capture_contact_page(*, profile: str, headless: bool) -> dict:
         # Step 5: Navigate to contact detail
         print("\n=== Step 5: Navigating to Contact Detail ===")
         if contact_id and location_id:
-            contact_url = f"https://app.gohighlevel.com/location/{location_id}/contacts/detail/{contact_id}"
+            # Use /v2/location/... for contact detail; /location/... often 404s.
+            contact_url = f"https://app.gohighlevel.com/v2/location/{location_id}/contacts/detail/{contact_id}"
             print(f"Opening contact: {contact_url}")
             await agent.navigate(contact_url)
             await asyncio.sleep(3)
@@ -298,6 +332,14 @@ async def capture_contact_page(*, profile: str, headless: bool) -> dict:
         page_structure = await agent.evaluate(page_structure_js)
         print("\n📋 Page Structure:")
         print(json.dumps(page_structure, indent=2))
+
+        # Baseline API calls before clicking Notes/Tasks (don't clear logs; just diff).
+        baseline_api_calls = agent.get_api_calls(domain_filter="leadconnectorhq.com")
+        baseline_request_ids = {
+            c.get("request_id")
+            for c in baseline_api_calls
+            if isinstance(c, dict) and c.get("request_id")
+        }
         
         # Step 7: Try to find and click Notes tab
         print("\n=== Step 7: Looking for Notes tab ===")
@@ -306,7 +348,10 @@ async def capture_contact_page(*, profile: str, headless: bool) -> dict:
         # triggered during initial page load, and clearing would also destroy
         # useful debugging context if the click fails.
         
-        notes_click = await agent.evaluate(_build_click_by_text_js("Notes"))
+        # Prefer the known contact detail tab id; fall back to fuzzy text.
+        notes_click = await agent.evaluate(_build_click_by_selector_js("#notes-tab"))
+        if not (isinstance(notes_click, dict) and notes_click.get("success")):
+            notes_click = await agent.evaluate(_build_click_by_text_js("Notes"))
         print(f"Notes click result: {notes_click}")
         
         if isinstance(notes_click, dict) and notes_click.get('success'):
@@ -317,15 +362,27 @@ async def capture_contact_page(*, profile: str, headless: bool) -> dict:
             print("⚠️  Could not find Notes tab")
 
         # Snapshot API calls after Notes is opened (before navigating elsewhere).
-        notes_api_calls = agent.get_api_calls(domain_filter="leadconnectorhq.com")
-        notes_request_ids = {
-            c.get("request_id") for c in notes_api_calls if isinstance(c, dict) and c.get("request_id")
+        after_notes_calls = agent.get_api_calls(domain_filter="leadconnectorhq.com")
+        notes_endpoints = [
+            c
+            for c in after_notes_calls
+            if isinstance(c, dict)
+            and c.get("request_id")
+            and c.get("request_id") not in baseline_request_ids
+        ]
+        after_notes_request_ids = {
+            c.get("request_id")
+            for c in after_notes_calls
+            if isinstance(c, dict) and c.get("request_id")
         }
 
         # Step 8: Try to find and click Tasks tab
         print("\n=== Step 8: Looking for Tasks tab ===")
         
-        tasks_click = await agent.evaluate(_build_click_by_text_js("Tasks"))
+        # Prefer the known contact detail tab id; fall back to fuzzy text.
+        tasks_click = await agent.evaluate(_build_click_by_selector_js("#task-tab"))
+        if not (isinstance(tasks_click, dict) and tasks_click.get("success")):
+            tasks_click = await agent.evaluate(_build_click_by_text_js("Tasks"))
         print(f"Tasks click result: {tasks_click}")
         
         if isinstance(tasks_click, dict) and tasks_click.get('success'):
@@ -339,15 +396,13 @@ async def capture_contact_page(*, profile: str, headless: bool) -> dict:
         print("\n=== Step 9: Analyzing captured API calls ===")
 
         api_calls = agent.get_api_calls(domain_filter="leadconnectorhq.com")
-
-        # Calls attributable to the Notes click = everything observed up to the snapshot.
-        notes_endpoints = notes_api_calls
-
-        # Calls attributable to the Tasks click = calls observed after the snapshot.
+        # Calls attributable to the Tasks click = calls observed after the Notes snapshot.
         tasks_endpoints = [
             c
             for c in api_calls
-            if isinstance(c, dict) and c.get("request_id") and c.get("request_id") not in notes_request_ids
+            if isinstance(c, dict)
+            and c.get("request_id")
+            and c.get("request_id") not in after_notes_request_ids
         ]
         
         print(f"\n📝 Notes-related API calls ({len(notes_endpoints)}):")

@@ -52,10 +52,19 @@ def _parse_due_date(value: object) -> date | None:
 
 
 def _extract_assigned_to(payload: dict) -> str | None:
-    for key in ("assignedTo", "assignedToName", "assignedUser", "assignedUserId"):
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
+    def _scan(d: dict) -> str | None:
+        for key in ("assignedTo", "assignedToName", "assignedUser", "assignedUserId"):
+            value = d.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None
+
+    hit = _scan(payload)
+    if hit:
+        return hit
+    props = payload.get("properties")
+    if isinstance(props, dict):
+        return _scan(props)
     return None
 
 
@@ -114,29 +123,51 @@ async def import_tasks(
                 payload=task_payload,
             )
 
-            title = task_payload.get("title") or task_payload.get("name") or ""
+            props = task_payload.get("properties")
+            if not isinstance(props, dict):
+                props = {}
+
+            # services.leadconnectorhq.com task records nest fields under `properties`.
+            title = props.get("title") or task_payload.get("title") or task_payload.get("name") or ""
             if not isinstance(title, str):
                 title = str(title)
 
-            description = task_payload.get("description")
+            description = props.get("description")
+            if description is None:
+                description = task_payload.get("description")
+            if description is None:
+                description = props.get("body")
             if description is None:
                 description = task_payload.get("body")
             if description is not None and not isinstance(description, str):
                 description = str(description)
 
             status = task_payload.get("status")
-            if isinstance(task_payload.get("completed"), bool):
-                status = "done" if task_payload["completed"] else (status or "pending")
+            if status is None:
+                status = props.get("status")
+
+            completed_val = task_payload.get("completed")
+            if not isinstance(completed_val, bool):
+                completed_val = props.get("completed")
+            if isinstance(completed_val, bool):
+                status = "done" if completed_val else (status or "pending")
             if not isinstance(status, str) or not status.strip():
                 status = "pending"
 
             priority = task_payload.get("priority")
+            if priority is None:
+                priority = props.get("priority")
             if isinstance(priority, bool):
                 priority = int(priority)
             if not isinstance(priority, int):
                 priority = 0
 
-            due_date = _parse_due_date(task_payload.get("dueDate") or task_payload.get("due_date"))
+            due_date = _parse_due_date(
+                task_payload.get("dueDate")
+                or task_payload.get("due_date")
+                or props.get("dueDate")
+                or props.get("due_date")
+            )
 
             stmt = select(Task).where(
                 Task.location_id == location.id,
