@@ -3,12 +3,49 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date, datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..models.task import Task
+
+
+def _coerce_date(value: object) -> date | None:
+    """Coerce common date representations into a Python `date`.
+
+    Postgres expects a real date object for Date columns; strings that may
+    "work" in SQLite will fail when bound by asyncpg.
+    """
+    if value is None:
+        return None
+
+    if isinstance(value, datetime):
+        # Preserve day in a stable timezone.
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.date()
+
+    if isinstance(value, date):
+        return value
+
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        # Common HTML date input format: YYYY-MM-DD
+        try:
+            return date.fromisoformat(raw[:10])
+        except ValueError:
+            pass
+        # ISO datetime string.
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00")).date()
+        except ValueError:
+            return None
+
+    return None
 
 
 async def list_tasks(
@@ -29,6 +66,8 @@ async def list_tasks(
 
 
 async def create_task(db: AsyncSession, location_id: uuid.UUID, **kwargs) -> Task:
+    if "due_date" in kwargs:
+        kwargs["due_date"] = _coerce_date(kwargs.get("due_date"))
     task = Task(location_id=location_id, **kwargs)
     db.add(task)
     await db.commit()
@@ -42,6 +81,8 @@ async def update_task(db: AsyncSession, task_id: uuid.UUID, **kwargs) -> Task | 
     task = result.scalar_one_or_none()
     if not task:
         return None
+    if "due_date" in kwargs:
+        kwargs["due_date"] = _coerce_date(kwargs.get("due_date"))
     for key, value in kwargs.items():
         setattr(task, key, value)
     await db.commit()
