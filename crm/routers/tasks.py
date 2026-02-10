@@ -19,6 +19,17 @@ from ..tenant.deps import get_current_location
 router = APIRouter(tags=["tasks"])
 templates = Jinja2Templates(directory=str(settings.templates_dir))
 
+def _safe_next_url(value: object) -> str | None:
+    """Allow only local relative redirect targets to avoid open redirects."""
+    if not isinstance(value, str):
+        return None
+    v = value.strip()
+    if not v or not v.startswith("/"):
+        return None
+    if v.startswith("//") or "://" in v:
+        return None
+    return v
+
 
 @router.get("/loc/{slug}/tasks/")
 async def task_list(
@@ -49,10 +60,25 @@ async def task_create(
     title = form.get("title", "").strip()
     description = form.get("description", "").strip() or None
     due_date = form.get("due_date", "").strip() or None
-    priority = int(form.get("priority", "0"))
+    try:
+        priority = int(form.get("priority", "0"))
+    except (TypeError, ValueError):
+        priority = 0
     assigned_to = form.get("assigned_to", "").strip() or None
     contact_id_str = form.get("contact_id", "")
-    contact_id = uuid.UUID(contact_id_str) if contact_id_str else None
+    try:
+        contact_id = uuid.UUID(contact_id_str) if contact_id_str else None
+    except (TypeError, ValueError):
+        contact_id = None
+
+    # Defensive: ensure contact belongs to this location before linking.
+    if contact_id is not None:
+        from ..models.contact import Contact
+
+        stmt = select(Contact).where(Contact.id == contact_id, Contact.location_id == location.id)
+        contact = (await db.execute(stmt)).scalar_one_or_none()
+        if contact is None:
+            contact_id = None
 
     if title:
         task = await task_svc.create_task(
@@ -64,6 +90,9 @@ async def task_create(
             db, location.id, "task", task.id, "created",
             description=f"Task '{title}' created"
         )
+    next_url = _safe_next_url(form.get("next"))
+    if next_url:
+        return RedirectResponse(next_url, status_code=303)
     return RedirectResponse(f"/loc/{slug}/tasks/", status_code=303)
 
 
@@ -77,7 +106,16 @@ async def task_update_status(
 ):
     form = await request.form()
     new_status = form.get("status", "pending")
-    await task_svc.update_task(db, task_id, status=new_status)
+    # Verify task belongs to this location.
+    from ..models.task import Task
+
+    stmt = select(Task).where(Task.id == task_id, Task.location_id == location.id)
+    task = (await db.execute(stmt)).scalar_one_or_none()
+    if task:
+        await task_svc.update_task(db, task_id, status=new_status)
+    next_url = _safe_next_url(form.get("next"))
+    if next_url:
+        return RedirectResponse(next_url, status_code=303)
     return RedirectResponse(f"/loc/{slug}/tasks/", status_code=303)
 
 

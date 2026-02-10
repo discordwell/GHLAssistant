@@ -105,6 +105,19 @@
                 </div>
 
                 {% elif tab == 'tasks' %}
+                <form method="post" action="/loc/{{ location.slug }}/tasks/" class="mb-4 space-y-2">
+                    <input type="hidden" name="contact_id" value="{{ contact.id }}">
+                    <input type="hidden" name="next" value="/loc/{{ location.slug }}/contacts/{{ contact.id }}?tab=tasks">
+                    <div class="flex gap-2">
+                        <input type="text" name="title" required placeholder="Add a task..."
+                               class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                        <input type="date" name="due_date"
+                               class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                        <button type="submit" class="bg-indigo-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-indigo-700">Add</button>
+                    </div>
+                    <textarea name="description" rows="2" placeholder="Description (optional)..."
+                              class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"></textarea>
+                </form>
                 <div class="space-y-2">
                     {% for task in contact.tasks %}
                     <div class="border border-gray-100 rounded-lg p-3 flex items-center justify-between">
@@ -114,6 +127,7 @@
                         </div>
                         <form method="post" action="/loc/{{ location.slug }}/tasks/{{ task.id }}/status">
                             <input type="hidden" name="status" value="{% if task.status == 'done' %}pending{% else %}done{% endif %}">
+                            <input type="hidden" name="next" value="/loc/{{ location.slug }}/contacts/{{ contact.id }}?tab=tasks">
                             <button type="submit" class="text-xs px-2 py-1 rounded {% if task.status == 'done' %}bg-green-100 text-green-700{% else %}bg-gray-100 text-gray-600{% endif %}">
                                 {{ task.status }}
                             </button>
