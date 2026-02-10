@@ -304,14 +304,36 @@ class TokenManager:
         with open(filepath) as f:
             data = json.load(f)
 
-        token = data.get("auth", {}).get("access_token")
+        auth_block = data.get("auth") or {}
+        cookie_auth_block = data.get("cookie_auth") or {}
+
+        token = None
+        if isinstance(auth_block, dict):
+            token = auth_block.get("access_token")
+        if not token and isinstance(cookie_auth_block, dict):
+            token = cookie_auth_block.get("access_token")
         if not token:
             raise ValueError("No access token found in session file")
 
-        # Extract IDs from API calls
+        # Extract IDs from auth blocks and API calls
         user_id = None
         company_id = None
         location_id = None
+
+        if isinstance(auth_block, dict):
+            user_id = auth_block.get("userId") if isinstance(auth_block.get("userId"), str) else None
+            company_id = auth_block.get("companyId") if isinstance(auth_block.get("companyId"), str) else None
+            location_id = (
+                auth_block.get("locationId") if isinstance(auth_block.get("locationId"), str) else None
+            )
+
+        if isinstance(cookie_auth_block, dict):
+            user_id = user_id or (
+                cookie_auth_block.get("user_id") if isinstance(cookie_auth_block.get("user_id"), str) else None
+            )
+            company_id = company_id or (
+                cookie_auth_block.get("company_id") if isinstance(cookie_auth_block.get("company_id"), str) else None
+            )
 
         for call in data.get("api_calls", []):
             url = call.get("url", "")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +13,34 @@ from ..models.contact import Contact
 from ..models.location import Location
 from ..schemas.sync import SyncResult
 from .raw_store import upsert_raw_entity
+
+
+def _norm_str(value: Any, *, default: str = "") -> str:
+    if isinstance(value, str):
+        v = value.strip()
+        return v if v else default
+    if isinstance(value, (int, float)):
+        return str(value)
+    return default
+
+
+def _norm_channel(value: Any, *, default: str = "sms") -> str:
+    """Normalize GHL message/conversation channel/type into a string.
+
+    Observed:
+      - Some payloads use string types (e.g. "sms", "email")
+      - Some message payloads use numeric codes (e.g. 3 for email)
+    """
+    if isinstance(value, str):
+        v = value.strip().lower()
+        return v or default
+    if isinstance(value, (int, float)):
+        # Best-effort mapping from observed numeric codes.
+        mapping = {
+            3: "email",
+        }
+        return mapping.get(int(value), str(int(value)))
+    return default
 
 
 async def import_conversations(
@@ -58,7 +87,7 @@ async def import_conversations(
             conv = Conversation(
                 location_id=location.id,
                 contact_id=contact_id,
-                channel=c_data.get("type", "sms"),
+                channel=_norm_channel(c_data.get("type"), default="sms"),
                 subject=c_data.get("subject"),
                 unread_count=c_data.get("unreadCount", 0),
                 ghl_id=ghl_id,
@@ -94,8 +123,8 @@ async def import_conversations(
                 location_id=location.id,
                 conversation_id=conv.id,
                 contact_id=contact_id,
-                direction=m_data.get("direction", "outbound"),
-                channel=m_data.get("type", conv.channel or "sms"),
+                direction=_norm_str(m_data.get("direction"), default="outbound"),
+                channel=_norm_channel(m_data.get("type"), default=(conv.channel or "sms")),
                 body=m_data.get("body", ""),
                 subject=m_data.get("subject"),
                 from_address=m_data.get("from"),

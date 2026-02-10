@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
 
+import httpx
+
 if TYPE_CHECKING:
     from .client import GHLClient
 
@@ -48,6 +50,78 @@ class OpportunitiesAPI:
         lid = location_id or self._location_id
         return await self._client._get("/opportunities/pipelines", locationId=lid)
 
+    async def list_all(
+        self,
+        *,
+        location_id: str | None = None,
+        page_size: int = 200,
+        max_pages: int = 25,
+    ) -> list[dict]:
+        """List opportunities for a location (best-effort).
+
+        Uses the newer POST `/opportunities/search` endpoint.
+        Some filter fields are strict/undocumented; we fetch pages and
+        filter client-side in `list()`.
+        """
+        lid = location_id or self._location_id
+        page_size = max(1, int(page_size))
+        max_pages = max(1, int(max_pages))
+
+        all_items: list[dict] = []
+        seen_ids: set[str] = set()
+        skip = 0
+        allow_skip = True
+
+        for _ in range(max_pages):
+            payload: dict[str, Any] = {"locationId": lid, "limit": page_size}
+            if skip and allow_skip:
+                payload["skip"] = skip
+
+            try:
+                resp = await self._client._post("/opportunities/search", payload)
+            except httpx.HTTPStatusError as exc:
+                # Some deployments may not accept `skip`; retry once without it.
+                body = ""
+                try:
+                    body = exc.response.text or ""
+                except Exception:
+                    body = ""
+                if exc.response.status_code == 422 and "property skip should not exist" in body:
+                    allow_skip = False
+                    payload.pop("skip", None)
+                    resp = await self._client._post("/opportunities/search", payload)
+                else:
+                    raise
+
+            items = resp.get("opportunities", [])
+            if not isinstance(items, list) or not items:
+                break
+
+            new_count = 0
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                oid = item.get("id", item.get("_id", ""))
+                if isinstance(oid, str) and oid:
+                    if oid in seen_ids:
+                        continue
+                    seen_ids.add(oid)
+                all_items.append(item)
+                new_count += 1
+
+            if new_count == 0:
+                break
+
+            total = resp.get("total")
+            if isinstance(total, int) and total >= 0 and len(all_items) >= total:
+                break
+
+            if not allow_skip:
+                break
+            skip += len(items)
+
+        return all_items
+
     async def list(
         self,
         pipeline_id: str | None = None,
@@ -68,16 +142,26 @@ class OpportunitiesAPI:
         Returns:
             {"opportunities": [...], "meta": {...}}
         """
-        lid = location_id or self._location_id
-        params = {"locationId": lid, "limit": limit}
-        if pipeline_id:
-            params["pipelineId"] = pipeline_id
-        if stage_id:
-            params["stageId"] = stage_id
-        if contact_id:
-            params["contactId"] = contact_id
+        items = await self.list_all(location_id=location_id)
 
-        return await self._client._get("/opportunities/", **params)
+        def _match(item: dict) -> bool:
+            if pipeline_id:
+                pid = item.get("pipelineId", item.get("pipeline_id"))
+                if pid != pipeline_id:
+                    return False
+            if stage_id:
+                sid = item.get("pipelineStageId", item.get("pipeline_stage_id"))
+                if sid != stage_id:
+                    return False
+            if contact_id:
+                cid = item.get("contactId", item.get("contact_id"))
+                if cid != contact_id:
+                    return False
+            return True
+
+        filtered = [i for i in items if isinstance(i, dict) and _match(i)]
+        lim = max(0, int(limit))
+        return {"opportunities": filtered[:lim] if lim else filtered, "total": len(filtered)}
 
     async def get(self, opportunity_id: str) -> dict[str, Any]:
         """Get opportunity details.

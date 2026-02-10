@@ -264,10 +264,12 @@ class ContactsAPI:
         Returns:
             Created note data
         """
-        lid = location_id or self._location_id
+        # Notes live under the contact resource; older /notes/ endpoints 404.
+        # Note: this endpoint does NOT accept locationId as a query/body param.
+        _ = location_id  # ignored
         return await self._client._post(
-            "/notes/",
-            {"contactId": contact_id, "body": body, "locationId": lid},
+            f"/contacts/{contact_id}/notes",
+            {"body": body},
         )
 
     async def get_notes(
@@ -282,8 +284,10 @@ class ContactsAPI:
         Returns:
             {"notes": [...]}
         """
-        lid = location_id or self._location_id
-        return await self._client._get("/notes/", contactId=contact_id, locationId=lid)
+        # Notes are nested under the contact resource. This endpoint does not
+        # accept locationId; callers may pass it anyway (we ignore it).
+        _ = location_id  # ignored
+        return await self._client._get(f"/contacts/{contact_id}/notes")
 
     # =========================================================================
     # Tasks
@@ -295,6 +299,7 @@ class ContactsAPI:
         title: str,
         due_date: str | None = None,
         description: str | None = None,
+        completed: bool = False,
         location_id: str | None = None,
     ) -> dict[str, Any]:
         """Add a task for a contact.
@@ -309,18 +314,21 @@ class ContactsAPI:
         Returns:
             Created task data
         """
-        lid = location_id or self._location_id
-        data = {
-            "contactId": contact_id,
-            "title": title,
-            "locationId": lid,
-        }
-        if due_date:
-            data["dueDate"] = due_date
-        if description:
-            data["description"] = description
+        if not isinstance(due_date, str) or not due_date.strip():
+            raise ValueError("due_date required (GHL requires dueDate for contact tasks)")
 
-        return await self._client._post("/tasks/", data)
+        data = {
+            "title": title,
+            "dueDate": due_date,
+            "completed": bool(completed),
+        }
+        _ = location_id  # ignored (this endpoint rejects it in the JSON body)
+
+        # The backend rejects `description`; it accepts `body`.
+        if isinstance(description, str) and description.strip():
+            data["body"] = description
+
+        return await self._client._post(f"/contacts/{contact_id}/tasks", data)
 
     async def get_tasks(
         self, contact_id: str, location_id: str | None = None
@@ -334,8 +342,14 @@ class ContactsAPI:
         Returns:
             {"tasks": [...]}
         """
-        lid = location_id or self._location_id
-        return await self._client._get("/tasks/", contactId=contact_id, locationId=lid)
+        # Tasks are nested under the contact resource; older /tasks/ endpoints 404.
+        # This endpoint accepts an optional locationId query param.
+        params: dict[str, Any] = {}
+        # Optional: locationId can be passed, but contactId is usually sufficient.
+        lid = location_id or self._client.config.location_id
+        if isinstance(lid, str) and lid:
+            params["locationId"] = lid
+        return await self._client._get(f"/contacts/{contact_id}/tasks", **params)
 
     # =========================================================================
     # Workflows
