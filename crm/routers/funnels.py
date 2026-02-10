@@ -163,7 +163,7 @@ async def delete_page(
 
 
 # Public funnel page
-@router.get("/p/{funnel_id}/{url_slug}")
+@router.get("/p/{funnel_id}/{url_slug:path}")
 async def public_page(
     request: Request,
     funnel_id: uuid.UUID,

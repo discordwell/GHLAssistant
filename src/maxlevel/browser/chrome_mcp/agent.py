@@ -126,6 +126,11 @@ class ChromeMCPAgent:
         if parsed.netloc != "app.gohighlevel.com":
             return url
 
+        # Location-scoped routes generally work as direct paths and should not be
+        # rewritten to deep-link form (doing so can trigger redirects for some accounts).
+        if parsed.path.startswith("/location/"):
+            return url
+
         # Already root or already deep-linked.
         if parsed.path in {"", "/"}:
             qs = parse_qs(parsed.query or "")

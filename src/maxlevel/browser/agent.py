@@ -212,10 +212,17 @@ class BrowserAgent:
             url = normalized
         else:
             print(f"Navigating to: {url}")
-        self.page = await self.browser.get(url)
+        # Reuse the existing tab when possible. Creating a new tab would detach
+        # previously-registered CDP handlers and make network capture unreliable.
+        if self.page is not None:
+            await self.page.get(url)
+        else:
+            self.page = await self.browser.get(url)
 
-        # Re-enable network capture on new page
-        if self.capture_network and self.network:
+        # Ensure network capture is enabled on the active page.
+        if self.capture_network:
+            if not self.network or self.network.page is not self.page:
+                self.network = NetworkCapture(self.page)
             await self.network.enable()
 
         await self._wait_for_load()
@@ -240,6 +247,12 @@ class BrowserAgent:
         if parsed.scheme not in {"http", "https"}:
             return url
         if parsed.netloc != "app.gohighlevel.com":
+            return url
+
+        # Location-scoped routes generally work as direct paths and should not be
+        # rewritten to deep-link form (doing so can trigger redirects back to the
+        # agency launchpad for some accounts).
+        if parsed.path.startswith("/location/"):
             return url
 
         # Already on root (including existing deep links like /?url=...).
@@ -352,7 +365,37 @@ class BrowserAgent:
 
     async def evaluate(self, js_code: str) -> Any:
         """Execute JavaScript and return result."""
-        return await self.page.evaluate(js_code)
+        value = await self.page.evaluate(js_code)
+        return self._unwrap_eval_value(value)
+
+    @staticmethod
+    def _unwrap_eval_value(value: Any) -> Any:
+        """Best-effort normalization of nodriver's evaluate return values.
+
+        nodriver returns primitives as Python values, but represents:
+        - Arrays as lists of {"type": ..., "value": ...} items
+        - Objects as lists of [key, {"type": ..., "value": ...}] pairs
+        """
+        if isinstance(value, dict):
+            # RemoteObject-like wrapper.
+            if value.get("type") in {"null", "undefined"} and "value" not in value:
+                return None
+            if "type" in value and "value" in value and len(value) <= 4:
+                return BrowserAgent._unwrap_eval_value(value.get("value"))
+            return {k: BrowserAgent._unwrap_eval_value(v) for k, v in value.items()}
+
+        if isinstance(value, list):
+            # Object represented as list of [key, value] pairs.
+            if value and all(
+                isinstance(item, (list, tuple))
+                and len(item) == 2
+                and isinstance(item[0], str)
+                for item in value
+            ):
+                return {item[0]: BrowserAgent._unwrap_eval_value(item[1]) for item in value}
+            return [BrowserAgent._unwrap_eval_value(item) for item in value]
+
+        return value
 
     async def get_cookies(self) -> dict[str, str]:
         """Return current document/URL cookies as a simple name->value dict.
@@ -647,7 +690,34 @@ class BrowserAgent:
             if isinstance(check, dict):
                 if bool(check.get("looksLikeLogin")):
                     return False
-                return bool(check.get("hasAuthToken"))
+                if bool(check.get("hasAuthToken")):
+                    return True
+
+                # GHL often authenticates purely via cookies (m_a), so auth tokens may
+                # not be present in localStorage/sessionStorage. Fall back to cookie
+                # inspection when the page does not look like a login form.
+                try:
+                    cookie_auth = await self.extract_cookie_auth()
+                    token = cookie_auth.get("access_token") if cookie_auth else None
+                    if isinstance(token, str) and token.count(".") >= 2:
+                        try:
+                            # Best-effort expiry check (30s buffer).
+                            payload_b64 = token.split(".")[1]
+                            padding = "=" * ((4 - (len(payload_b64) % 4)) % 4)
+                            payload = json.loads(base64.urlsafe_b64decode(payload_b64 + padding))
+                            exp = payload.get("exp") if isinstance(payload, dict) else None
+                            if isinstance(exp, (int, float)):
+                                now = datetime.now().timestamp()
+                                return int(exp) > int(now) + 30
+                        except Exception:
+                            # If we can't decode exp, still treat cookie token as a sign-in hint.
+                            return True
+                    if isinstance(token, str) and token:
+                        return True
+                except Exception:
+                    pass
+
+                return False
             if isinstance(check, bool):
                 return not check
         except Exception:
@@ -771,63 +841,109 @@ async def run_capture_session(
         duration: How long to capture (seconds), 0 = until manual close
         output: Output file path for session data
     """
-    async with BrowserAgent(profile_name=profile, capture_network=True) as agent:
-        # Navigate to URL
-        state = await agent.navigate(url)
-        print(f"Page loaded: {state.get('title', 'Unknown')}")
+    stop_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
 
-        # Check login state
-        if not await agent.is_logged_in():
+    def _handle_signal(_signum, _frame=None) -> None:
+        # Background jobs can ignore SIGINT; handle SIGTERM/SIGINT explicitly so
+        # users can stop capture and still get a session file written.
+        try:
+            loop.call_soon_threadsafe(stop_event.set)
+        except Exception:
+            try:
+                stop_event.set()
+            except Exception:
+                pass
+
+    prev_int = None
+    prev_term = None
+    try:
+        prev_int = signal.getsignal(signal.SIGINT)
+        prev_term = signal.getsignal(signal.SIGTERM)
+        signal.signal(signal.SIGINT, _handle_signal)
+        signal.signal(signal.SIGTERM, _handle_signal)
+    except Exception:
+        prev_int = None
+        prev_term = None
+
+    try:
+        async with BrowserAgent(profile_name=profile, capture_network=True) as agent:
+            # Navigate to URL
+            state = await agent.navigate(url)
+            print(f"Page loaded: {state.get('title', 'Unknown')}")
+
+            # Check login state
+            if not await agent.is_logged_in():
+                print("\n" + "=" * 60)
+                print("NOT LOGGED IN - Please log in manually in the browser")
+                print("The session will be saved for future use.")
+                print("=" * 60 + "\n")
+
+            if duration > 0:
+                print(f"\nCapturing traffic for {duration} seconds...")
+                print("Interact with the application in the browser.")
+                print("Press Ctrl+C to stop early.\n")
+
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=float(duration))
+                    print("\nCapture stopped")
+                except asyncio.TimeoutError:
+                    pass
+                except KeyboardInterrupt:
+                    print("\nCapture interrupted by user")
+            else:
+                print("\nCapturing traffic until browser is closed...")
+                print("Close the browser window or press Ctrl+C to stop.\n")
+
+                try:
+                    await stop_event.wait()
+                    print("\nCapture stopped")
+                except KeyboardInterrupt:
+                    print("\nCapture stopped")
+
+            # Export session
+            output_path = await agent.export_session(output)
+
+            # Persist the captured token into TokenManager storage so future
+            # `GHLClient.from_session()` calls won't accidentally use a stale token.
+            try:
+                from ..auth.manager import TokenManager
+
+                TokenManager().save_session_from_file(output_path)
+            except Exception:
+                pass
+
+            # Summary
+            api_calls = agent.get_api_calls()
+            auth = agent.get_auth_tokens()
+
             print("\n" + "=" * 60)
-            print("NOT LOGGED IN - Please log in manually in the browser")
-            print("The session will be saved for future use.")
-            print("=" * 60 + "\n")
+            print("CAPTURE SUMMARY")
+            print("=" * 60)
+            print(f"API calls captured: {len(api_calls)}")
+            print(f"Auth tokens found: {len(auth)}")
+            print(f"Screenshots taken: {len(agent.screenshots)}")
+            print(f"Session file: {output_path}")
 
-        if duration > 0:
-            print(f"\nCapturing traffic for {duration} seconds...")
-            print("Interact with the application in the browser.")
-            print("Press Ctrl+C to stop early.\n")
+            if auth:
+                print("\nAuth tokens:")
+                for key, value in auth.items():
+                    # Truncate tokens for display
+                    display_val = value[:50] + "..." if len(str(value)) > 50 else value
+                    print(f"  {key}: {display_val}")
 
-            try:
-                await asyncio.sleep(duration)
-            except KeyboardInterrupt:
-                print("\nCapture interrupted by user")
-        else:
-            print("\nCapturing traffic until browser is closed...")
-            print("Close the browser window or press Ctrl+C to stop.\n")
-
-            try:
-                # Keep running until interrupted
-                while True:
-                    await asyncio.sleep(1)
-            except KeyboardInterrupt:
-                print("\nCapture stopped")
-
-        # Export session
-        output_path = await agent.export_session(output)
-
-        # Summary
-        api_calls = agent.get_api_calls()
-        auth = agent.get_auth_tokens()
-
-        print("\n" + "=" * 60)
-        print("CAPTURE SUMMARY")
-        print("=" * 60)
-        print(f"API calls captured: {len(api_calls)}")
-        print(f"Auth tokens found: {len(auth)}")
-        print(f"Screenshots taken: {len(agent.screenshots)}")
-        print(f"Session file: {output_path}")
-
-        if auth:
-            print("\nAuth tokens:")
-            for key, value in auth.items():
-                # Truncate tokens for display
-                display_val = value[:50] + "..." if len(str(value)) > 50 else value
-                print(f"  {key}: {display_val}")
-
-        return {
-            "success": True,
-            "output": output_path,
-            "api_calls": len(api_calls),
-            "auth_tokens": auth,
-        }
+            return {
+                "success": True,
+                "output": output_path,
+                "api_calls": len(api_calls),
+                "auth_tokens": auth,
+            }
+    finally:
+        # Restore original handlers (best-effort).
+        try:
+            if prev_int is not None:
+                signal.signal(signal.SIGINT, prev_int)
+            if prev_term is not None:
+                signal.signal(signal.SIGTERM, prev_term)
+        except Exception:
+            pass

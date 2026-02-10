@@ -89,6 +89,10 @@ class NetworkCapture:
         self.page = page
         self.requests: dict[str, CapturedRequest] = {}
         self._enabled = False
+        # RequestIds that have a response we want to fetch a body for once the
+        # response is fully available (CDP only guarantees bodies after
+        # `Network.loadingFinished`).
+        self._want_body: set[str] = set()
         self.capture_response_bodies = capture_response_bodies
         self.max_response_body_chars = max_response_body_chars
         self.max_post_data_chars = max_post_data_chars
@@ -146,6 +150,8 @@ class NetworkCapture:
             # Add event handlers
             self.page.add_handler(network.RequestWillBeSent, self._on_request)
             self.page.add_handler(network.ResponseReceived, self._on_response)
+            self.page.add_handler(network.LoadingFinished, self._on_loading_finished)
+            self.page.add_handler(network.LoadingFailed, self._on_loading_failed)
 
             self._enabled = True
             print("Network capture enabled")
@@ -181,50 +187,92 @@ class NetworkCapture:
                     dict(event.response.headers) if event.response.headers else {}
                 )
 
-                if not self._should_capture_body(req.url, req.response_headers):
-                    return
-
-                # Try to get response body (may fail for some requests)
-                try:
-                    body_result = await self.page.send(network.get_response_body(event.request_id))
-                    if not body_result:
-                        return
-
-                    # nodriver versions differ: body_result may be an object with attributes
-                    # or a plain dict like {"body": "...", "base64Encoded": false}.
-                    if isinstance(body_result, dict):
-                        body = body_result.get("body")
-                        base64_encoded = bool(
-                            body_result.get("base64Encoded", body_result.get("base64_encoded", False))
-                        )
-                    else:
-                        body = getattr(body_result, "body", None)
-                        base64_encoded = bool(
-                            getattr(
-                                body_result,
-                                "base64_encoded",
-                                getattr(body_result, "base64Encoded", False),
-                            )
-                        )
-
-                    if base64_encoded:
-                        req.response_body_base64 = True
-                        req.response_body_length = len(body) if isinstance(body, str) else None
-                        return
-
-                    if isinstance(body, str):
-                        req.response_body_length = len(body)
-                        if len(body) > self.max_response_body_chars:
-                            req.response_body = (
-                                body[: self.max_response_body_chars] + "... [truncated]"
-                            )
-                            req.response_body_truncated = True
-                        else:
-                            req.response_body = body
-                except Exception:
-                    pass  # Body not available for all requests
+                if self._should_capture_body(req.url, req.response_headers):
+                    # CDP response bodies are not reliably available at
+                    # ResponseReceived; defer to LoadingFinished.
+                    self._want_body.add(request_id)
+                else:
+                    self._want_body.discard(request_id)
         except Exception as e:
             print(f"Warning: Error capturing response: {e}")
+
+    async def _on_loading_finished(self, event: network.LoadingFinished) -> None:
+        """Fetch response body after the request fully finishes loading."""
+        request_id = str(event.request_id)
+        if request_id not in self.requests:
+            return
+
+        req = self.requests[request_id]
+
+        # Only fetch once; skip if already captured.
+        if req.response_body is not None or req.response_body_base64:
+            self._want_body.discard(request_id)
+            return
+
+        # Avoid an extra body call if we already know we don't want it.
+        if request_id not in self._want_body and not self._should_capture_body(req.url, req.response_headers):
+            return
+
+        # Guard against very large responses even when headers omit Content-Length.
+        try:
+            encoded_len = float(getattr(event, "encoded_data_length", 0.0) or 0.0)
+        except Exception:
+            encoded_len = 0.0
+        if encoded_len and encoded_len > float(self.max_response_body_chars) * 4.0:
+            req.response_body_truncated = True
+            req.response_body_length = int(encoded_len)
+            self._want_body.discard(request_id)
+            return
+
+        try:
+            body_result = await self.page.send(network.get_response_body(event.request_id))
+            if not body_result:
+                return
+
+            # nodriver CDP wrappers have changed return types across versions:
+            # - tuple[str, bool] (current): (body, base64Encoded)
+            # - dict/object with {"body": ..., "base64Encoded": ...} (older)
+            body: str | None = None
+            base64_encoded = False
+            if isinstance(body_result, tuple) and len(body_result) == 2:
+                body = body_result[0] if isinstance(body_result[0], str) else None
+                base64_encoded = bool(body_result[1])
+            elif isinstance(body_result, dict):
+                body = body_result.get("body")
+                base64_encoded = bool(
+                    body_result.get("base64Encoded", body_result.get("base64_encoded", False))
+                )
+            else:
+                body = getattr(body_result, "body", None)
+                base64_encoded = bool(
+                    getattr(
+                        body_result,
+                        "base64_encoded",
+                        getattr(body_result, "base64Encoded", False),
+                    )
+                )
+
+            if base64_encoded:
+                req.response_body_base64 = True
+                req.response_body_length = len(body) if isinstance(body, str) else None
+                return
+
+            if isinstance(body, str):
+                req.response_body_length = len(body)
+                if len(body) > self.max_response_body_chars:
+                    req.response_body = body[: self.max_response_body_chars] + "... [truncated]"
+                    req.response_body_truncated = True
+                else:
+                    req.response_body = body
+        except Exception:
+            # Body isn't available for all requests (e.g., some cached or opaque responses).
+            return
+        finally:
+            self._want_body.discard(request_id)
+
+    async def _on_loading_failed(self, event: network.LoadingFailed) -> None:
+        request_id = str(event.request_id)
+        self._want_body.discard(request_id)
 
     def get_requests(self) -> list[dict]:
         """Get all captured requests."""

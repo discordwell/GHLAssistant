@@ -500,15 +500,25 @@ async def run_import(db: AsyncSession, location: Location) -> SyncResult:
 
         # 7. Opportunities per pipeline
         opportunities_by_pipeline: dict[str, list[dict]] = {}
-        for p_data in pipelines_data:
-            p_id = p_data["id"]
-            if not p_id:
-                continue
-            try:
-                opps_resp = await ghl.opportunities.list(
-                    pipeline_id=p_id, location_id=lid
-                )
-                opps_list = opps_resp.get("opportunities", [])
+        try:
+            all_opps = await ghl.opportunities.list_all(location_id=lid)
+            if not isinstance(all_opps, list):
+                all_opps = []
+
+            grouped: dict[str, list[dict]] = {}
+            for o in all_opps:
+                if not isinstance(o, dict):
+                    continue
+                pid = o.get("pipelineId") or o.get("pipeline_id") or ""
+                if not isinstance(pid, str) or not pid:
+                    continue
+                grouped.setdefault(pid, []).append(o)
+
+            for p_data in pipelines_data:
+                p_id = p_data["id"]
+                if not p_id:
+                    continue
+                opps_list = grouped.get(p_id, [])
                 opportunities_by_pipeline[p_id] = opps_list
                 r = await import_opportunities(
                     db, location, opps_list, stage_map, contact_map, p_id
@@ -516,8 +526,8 @@ async def run_import(db: AsyncSession, location: Location) -> SyncResult:
                 total.created += r.created
                 total.updated += r.updated
                 total.errors.extend(r.errors)
-            except Exception as e:
-                total.errors.append(f"Opportunities import error: {e}")
+        except Exception as e:
+            total.errors.append(f"Opportunities import error: {e}")
         write_sync_archive(
             archive_key,
             "opportunities",
@@ -790,6 +800,27 @@ async def run_import(db: AsyncSession, location: Location) -> SyncResult:
                     "page_details_by_funnel": page_details_by_funnel,
                 },
             )
+
+            # 13a. Funnels: capture page-builder JSON ("page-data") into blobstore/assets (best-effort).
+            if settings.sync_funnels_capture_page_builder_data:
+                try:
+                    from .import_funnel_page_builder import capture_funnel_page_builder_data
+
+                    br = await capture_funnel_page_builder_data(
+                        db,
+                        location,
+                        ghl,
+                        blobstore_dir=str(settings.blobstore_dir),
+                        limit=int(settings.sync_funnels_capture_page_builder_data_limit or 0),
+                    )
+                    if br.refs_created or br.assets_created:
+                        total.errors.append(
+                            "INFO: Funnel page builder JSON captured "
+                            f"{br.assets_created} asset(s), {br.refs_created} ref(s)"
+                        )
+                    total.errors.extend(br.errors)
+                except Exception as e:
+                    total.errors.append(f"Funnel builder capture error: {e}")
 
             # 13b. Assets: discover funnel page HTML references (best-effort)
             try:

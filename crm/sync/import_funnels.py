@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +26,8 @@ def _extract_funnel_payload(detail: dict) -> dict:
         return {}
     if isinstance(detail.get("funnel"), dict):
         return detail["funnel"]
+    if isinstance(detail.get("data"), dict):
+        return detail["data"]
     return detail
 
 
@@ -33,6 +36,8 @@ def _extract_page_payload(detail: dict) -> dict:
         return {}
     if isinstance(detail.get("page"), dict):
         return detail["page"]
+    if isinstance(detail.get("data"), dict):
+        return detail["data"]
     return detail
 
 
@@ -44,6 +49,34 @@ def _is_true(value: Any, default: bool = False) -> bool:
     if isinstance(value, (int, float)):
         return bool(value)
     return default
+
+
+def _normalize_url_slug(raw: Any) -> str:
+    """Normalize GHL page URL/path/slug into a stable `url_slug` string.
+
+    GHL's `/funnels/page/list` returns a `url` field like `/home-page`.
+    Some environments may return a full URL; strip scheme/host and leading `/`.
+    """
+    if not isinstance(raw, str):
+        return ""
+    value = raw.strip()
+    if not value:
+        return ""
+
+    # If it's a full URL, use just the path.
+    try:
+        parsed = urlparse(value)
+        if parsed.scheme and parsed.netloc:
+            value = parsed.path or ""
+    except Exception:
+        pass
+
+    # Drop query/fragment if present.
+    value = value.split("?", 1)[0].split("#", 1)[0].strip()
+
+    # Normalize slashes. Preserve nested paths (FastAPI route uses `{url_slug:path}`).
+    value = value.lstrip("/").rstrip("/")
+    return value
 
 
 async def import_funnels(
@@ -105,7 +138,8 @@ async def import_funnels(
         for i, p_data in enumerate(pages_by_funnel.get(ghl_id, [])):
             p_ghl_id = p_data.get("id", p_data.get("_id", ""))
             p_name = p_data.get("name", f"Page {i+1}")
-            slug = p_data.get("slug", p_data.get("path", f"page-{i+1}"))
+            raw_slug = p_data.get("slug") or p_data.get("path") or p_data.get("url") or ""
+            slug = _normalize_url_slug(raw_slug) or f"page-{i+1}"
             page_detail = _extract_page_payload(_to_dict(details_for_funnel.get(p_ghl_id, {})))
             await upsert_raw_entity(
                 db,

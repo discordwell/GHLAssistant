@@ -55,6 +55,11 @@ class CRMSettings(BaseSettings):
     # Comma-separated Asset.source values to upload (default: funnel-page assets only).
     sync_assets_export_sources: str = "funnel_page_data_uri,funnel_page_html"
 
+    # Funnels fidelity: capture page-builder JSON ("page-data") into blobstore/assets.
+    # This significantly improves rebuildability of funnel pages.
+    sync_funnels_capture_page_builder_data: bool = True
+    sync_funnels_capture_page_builder_data_limit: int = 0  # 0 = unlimited
+
     asset_blobstore_dir: str = "data/blobstore"
 
     model_config = {"env_prefix": "CRM_", "env_file": ".env", "extra": "ignore"}

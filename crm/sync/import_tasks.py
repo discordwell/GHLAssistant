@@ -119,6 +119,8 @@ async def import_tasks(
                 title = str(title)
 
             description = task_payload.get("description")
+            if description is None:
+                description = task_payload.get("body")
             if description is not None and not isinstance(description, str):
                 description = str(description)
 
@@ -172,4 +174,3 @@ async def import_tasks(
 
     await db.commit()
     return result
-
