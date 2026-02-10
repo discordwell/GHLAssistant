@@ -1,9 +1,15 @@
 """Services-domain Tasks API.
 
 The v2 UI queries Tasks via a custom-object record search:
-  POST https://services.leadconnectorhq.com/objects/task/records/search
+  POST   /objects/task/records/search          — list / search tasks
+  POST   /objects/task/records                 — create a task record
+  PUT    /objects/task/records/{taskId}         — update a task record
+  DELETE /objects/task/records/{taskId}         — delete a task record
 
-Auth is via the Firebase `token-id` header captured from browser traffic.
+Tasks are stored as custom-object records keyed by ``"task"`` and linked to
+contacts via the ``TASK_CONTACT_ASSOCIATION`` relation.
+
+Auth is via the Firebase ``token-id`` header captured from browser traffic.
 """
 
 from __future__ import annotations
@@ -26,6 +32,10 @@ class TasksServiceAPI:
 
     def __init__(self, client: "GHLClient"):
         self._client = client
+
+    # ------------------------------------------------------------------
+    # Internal HTTP plumbing
+    # ------------------------------------------------------------------
 
     def _services_base_url(self) -> str:
         override = os.environ.get("MAXLEVEL_SERVICES_BASE_URL")
@@ -51,14 +61,39 @@ class TasksServiceAPI:
             raise RuntimeError("Client not initialized. Use 'async with' context.")
         return self._client._client  # type: ignore[return-value]
 
+    def _json_headers(self) -> dict[str, str]:
+        headers = dict(self._services_headers())
+        headers["Content-Type"] = "application/json"
+        return headers
+
     async def _post_json(self, path: str, *, data: dict[str, Any]) -> dict[str, Any]:
         client = self._require_http_client()
         url = f"{self._services_base_url()}{path}"
-        headers = dict(self._services_headers())
-        headers["Content-Type"] = "application/json"
-        resp = await client.post(url, json=data, headers=headers)
+        resp = await client.post(url, json=data, headers=self._json_headers())
         resp.raise_for_status()
         return resp.json()
+
+    async def _put_json(
+        self, path: str, *, data: dict[str, Any], params: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        client = self._require_http_client()
+        url = f"{self._services_base_url()}{path}"
+        resp = await client.put(url, json=data, headers=self._json_headers(), params=params)
+        resp.raise_for_status()
+        return resp.json()
+
+    async def _delete(self, path: str) -> dict[str, Any]:
+        client = self._require_http_client()
+        url = f"{self._services_base_url()}{path}"
+        resp = await client.delete(url, headers=self._services_headers())
+        resp.raise_for_status()
+        if resp.content:
+            return resp.json()
+        return {"success": True}
+
+    # ------------------------------------------------------------------
+    # Read operations
+    # ------------------------------------------------------------------
 
     async def search(
         self,
@@ -165,4 +200,191 @@ class TasksServiceAPI:
                 break
 
         return {"tasks": records}
+
+    # ------------------------------------------------------------------
+    # Write operations
+    # ------------------------------------------------------------------
+
+    async def create(
+        self,
+        *,
+        location_id: str,
+        title: str,
+        contact_id: str | None = None,
+        due_date: str | None = None,
+        description: str | None = None,
+        status: str = "incomplete",
+        assigned_to: str | None = None,
+        relations: list[dict[str, str]] | None = None,
+        properties: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Create a new task record.
+
+        Uses ``POST /objects/task/records``.
+
+        **Relation format** (validated by the API)::
+
+            [{"associationId": "TASK_CONTACT_ASSOCIATION", "recordId": "<contactId>"}]
+
+        When *contact_id* is provided the relation is built automatically.
+
+        Note: ``dueDate`` is **required** when *relations* are present.
+
+        Args:
+            location_id: GHL location ID.
+            title: Task title.
+            contact_id: Shorthand — automatically builds a contact relation.
+            due_date: ISO-8601 due date (e.g. ``"2026-02-15T00:00:00.000Z"``).
+                Required when linking to a contact.
+            description: Task description / body text.
+            status: ``"incomplete"`` (default) or ``"completed"``.
+            assigned_to: User ID to assign the task to.
+            relations: Explicit relations list of
+                ``{"associationId": …, "recordId": …}`` dicts.
+                Overrides *contact_id* if given.
+            properties: Raw properties dict — merged with any explicit
+                field arguments above.
+
+        Returns:
+            ``{"record": {id, objectKey, properties, …}}`` — the created record.
+        """
+        if not isinstance(location_id, str) or not location_id.strip():
+            raise ValueError("location_id required")
+        if not isinstance(title, str) or not title.strip():
+            raise ValueError("title required")
+
+        props: dict[str, Any] = dict(properties or {})
+        props["title"] = title
+        if due_date is not None:
+            props["dueDate"] = due_date
+        if description is not None:
+            props["description"] = description
+        if status:
+            props["status"] = status
+        if assigned_to is not None:
+            props["assignedTo"] = assigned_to
+
+        if relations is None and contact_id:
+            if "dueDate" not in props:
+                raise ValueError(
+                    "due_date is required when linking a task to a contact"
+                )
+            relations = [
+                {"associationId": TASK_CONTACT_ASSOCIATION, "recordId": contact_id}
+            ]
+
+        payload: dict[str, Any] = {
+            "locationId": location_id,
+            "properties": props,
+        }
+        if relations:
+            payload["relations"] = relations
+
+        return await self._post_json("/objects/task/records", data=payload)
+
+    async def update(
+        self,
+        task_id: str,
+        *,
+        location_id: str,
+        title: str | None = None,
+        due_date: str | None = None,
+        description: str | None = None,
+        status: str | None = None,
+        assigned_to: str | None = None,
+        relations: list[dict[str, str]] | None = None,
+        properties: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Update an existing task record.
+
+        Uses ``PUT /objects/task/records/{taskId}?locationId=…``.
+        ``locationId`` **must** be a query parameter.
+
+        Only provided fields are sent; ``None`` values are omitted.
+
+        Args:
+            task_id: ID of the task record.
+            location_id: GHL location ID (required as query param).
+            title: New title.
+            due_date: New due date (ISO-8601).
+            description: New description.
+            status: ``"incomplete"`` or ``"completed"``.
+            assigned_to: User ID to reassign.
+            relations: Updated relations list.
+            properties: Raw properties dict — merged with field args.
+
+        Returns:
+            ``{"record": {…}}`` — the updated record.
+        """
+        if not isinstance(task_id, str) or not task_id.strip():
+            raise ValueError("task_id required")
+        if not isinstance(location_id, str) or not location_id.strip():
+            raise ValueError("location_id required")
+
+        props: dict[str, Any] = dict(properties or {})
+        if title is not None:
+            props["title"] = title
+        if due_date is not None:
+            props["dueDate"] = due_date
+        if description is not None:
+            props["description"] = description
+        if status is not None:
+            props["status"] = status
+        if assigned_to is not None:
+            props["assignedTo"] = assigned_to
+
+        payload: dict[str, Any] = {}
+        if props:
+            payload["properties"] = props
+        if relations is not None:
+            payload["relations"] = relations
+
+        if not payload:
+            raise ValueError("At least one field to update is required")
+
+        return await self._put_json(
+            f"/objects/task/records/{task_id}",
+            data=payload,
+            params={"locationId": location_id},
+        )
+
+    async def toggle_status(
+        self,
+        task_id: str,
+        *,
+        location_id: str,
+        completed: bool,
+    ) -> dict[str, Any]:
+        """Toggle a task between completed and incomplete.
+
+        Convenience wrapper around :meth:`update`.
+
+        Args:
+            task_id: ID of the task record.
+            location_id: GHL location ID.
+            completed: ``True`` to mark done, ``False`` to re-open.
+
+        Returns:
+            Updated task record from the API.
+        """
+        return await self.update(
+            task_id,
+            location_id=location_id,
+            status="completed" if completed else "incomplete",
+        )
+
+    async def delete(self, task_id: str) -> dict[str, Any]:
+        """Delete a task record.
+
+        Uses ``DELETE /objects/task/records/{taskId}``.
+
+        Args:
+            task_id: ID of the task record.
+
+        Returns:
+            ``{"id": …, "success": true}``
+        """
+        if not isinstance(task_id, str) or not task_id.strip():
+            raise ValueError("task_id required")
+        return await self._delete(f"/objects/task/records/{task_id}")
 
