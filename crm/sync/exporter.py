@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -72,6 +72,29 @@ def _extract_ghl_id(payload: dict[str, Any] | None) -> str:
         if isinstance(value, str) and value:
             return value
     return ""
+
+
+def _as_utc(dt: datetime) -> datetime:
+    """Normalize naive/aware datetimes into UTC-aware datetimes for comparisons."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _needs_update(updated_at: datetime | None, last_synced_at: datetime | None) -> bool:
+    """Return True if local row should be exported as an update."""
+    if last_synced_at is None:
+        # Unknown sync state: safest is to push an update.
+        return True
+    if updated_at is None:
+        # If we can't tell, treat as changed.
+        return True
+    return _as_utc(updated_at) > _as_utc(last_synced_at)
+
+
+def _date_to_ghl_due_date(value: date) -> str:
+    # Common services-domain payload shape uses an ISO datetime string.
+    return f"{value.isoformat()}T00:00:00.000Z"
 
 
 def _map_custom_field_data_type(local_data_type: str | None) -> str:
@@ -325,33 +348,73 @@ async def export_contacts(db: AsyncSession, location: Location, ghl) -> SyncResu
 
 
 async def export_notes(db: AsyncSession, location: Location, ghl) -> SyncResult:
-    """Export local notes to GHL (best-effort, create-only)."""
+    """Export local notes to GHL (best-effort)."""
     result = SyncResult()
 
     stmt = (
         select(Note)
-        .where(Note.location_id == location.id, Note.ghl_id == None)  # noqa: E711
+        .where(Note.location_id == location.id)
         .options(selectinload(Note.contact))
         .order_by(Note.created_at.asc())
     )
     notes = list((await db.execute(stmt)).scalars().all())
 
+    token_id = getattr(getattr(ghl, "config", None), "token_id", None)
+    use_services = isinstance(token_id, str) and bool(token_id.strip())
+
     for note in notes:
-        if not getattr(note, "contact", None) or not getattr(note.contact, "ghl_id", None):
+        contact_ghl_id = getattr(getattr(note, "contact", None), "ghl_id", None)
+        now = datetime.now(timezone.utc)
+
+        # Update existing note in GHL when the local row changed after last sync.
+        if getattr(note, "ghl_id", None):
+            if not _needs_update(getattr(note, "updated_at", None), getattr(note, "last_synced_at", None)):
+                result.skipped += 1
+                continue
+            if not use_services:
+                result.errors.append(
+                    f"Note {note.id}: cannot update without services token-id (run capture/auth quick)"
+                )
+                continue
+            try:
+                await ghl.notes_service.update(  # type: ignore[attr-defined]
+                    note.ghl_id,
+                    location_id=location.ghl_location_id,
+                    body=note.body,
+                )
+                note.ghl_location_id = location.ghl_location_id
+                note.last_synced_at = now
+                result.updated += 1
+            except Exception as e:
+                result.errors.append(f"Note {note.id}: {e}")
+            continue
+
+        # Create missing note in GHL.
+        if not isinstance(contact_ghl_id, str) or not contact_ghl_id:
             result.errors.append(f"Note {note.id}: missing contact GHL id")
             continue
         try:
-            resp = await ghl.contacts.add_note(
-                note.contact.ghl_id,
-                note.body,
-                location_id=location.ghl_location_id,
-            )
-            payload = resp.get("note", resp) if isinstance(resp, dict) else {}
-            ghl_id = payload.get("id", payload.get("_id", "")) if isinstance(payload, dict) else ""
+            if use_services:
+                resp = await ghl.notes_service.create(  # type: ignore[attr-defined]
+                    location_id=location.ghl_location_id,
+                    body=note.body,
+                    contact_id=contact_ghl_id,
+                )
+                payload = resp.get("note", resp) if isinstance(resp, dict) else {}
+            else:
+                # Fallback: backend contact endpoint (create-only).
+                resp = await ghl.contacts.add_note(  # type: ignore[attr-defined]
+                    contact_ghl_id,
+                    note.body,
+                    location_id=location.ghl_location_id,
+                )
+                payload = resp.get("note", resp) if isinstance(resp, dict) else {}
+
+            ghl_id = _extract_ghl_id(payload)
             if isinstance(ghl_id, str) and ghl_id:
                 note.ghl_id = ghl_id
                 note.ghl_location_id = location.ghl_location_id
-                note.last_synced_at = datetime.now(timezone.utc)
+                note.last_synced_at = now
                 result.created += 1
             else:
                 result.errors.append(f"Note {note.id}: export succeeded but no id returned")
@@ -363,37 +426,88 @@ async def export_notes(db: AsyncSession, location: Location, ghl) -> SyncResult:
 
 
 async def export_tasks(db: AsyncSession, location: Location, ghl) -> SyncResult:
-    """Export local tasks to GHL (best-effort, create-only)."""
+    """Export local tasks to GHL (best-effort)."""
     result = SyncResult()
 
     stmt = (
         select(Task)
-        .where(Task.location_id == location.id, Task.ghl_id == None)  # noqa: E711
+        .where(Task.location_id == location.id)
         .options(selectinload(Task.contact))
         .order_by(Task.created_at.asc())
     )
     tasks = list((await db.execute(stmt)).scalars().all())
 
+    token_id = getattr(getattr(ghl, "config", None), "token_id", None)
+    use_services = isinstance(token_id, str) and bool(token_id.strip())
+
     for task in tasks:
-        if not getattr(task, "contact", None) or not getattr(task.contact, "ghl_id", None):
-            result.errors.append(f"Task {task.id}: missing contact GHL id")
+        now = datetime.now(timezone.utc)
+        due_date_val = getattr(task, "due_date", None)
+        due_iso = _date_to_ghl_due_date(due_date_val) if isinstance(due_date_val, date) else None
+
+        status_l = str(getattr(task, "status", "") or "").strip().lower()
+        remote_status = "completed" if status_l == "done" else "incomplete"
+
+        # Update existing task in GHL when local row changed after last sync.
+        if getattr(task, "ghl_id", None):
+            if not _needs_update(getattr(task, "updated_at", None), getattr(task, "last_synced_at", None)):
+                result.skipped += 1
+                continue
+            if not use_services:
+                result.errors.append(
+                    f"Task {task.id}: cannot update without services token-id (run capture/auth quick)"
+                )
+                continue
+            try:
+                await ghl.tasks_service.update(  # type: ignore[attr-defined]
+                    task.ghl_id,
+                    location_id=location.ghl_location_id,
+                    title=task.title,
+                    due_date=due_iso,
+                    description=task.description,
+                    status=remote_status,
+                    assigned_to=task.assigned_to,
+                )
+                task.ghl_location_id = location.ghl_location_id
+                task.last_synced_at = now
+                result.updated += 1
+            except Exception as e:
+                result.errors.append(f"Task {task.id}: {e}")
             continue
 
-        due_iso = task.due_date.isoformat() if getattr(task, "due_date", None) else None
+        # Create missing task in GHL.
+        contact_ghl_id = getattr(getattr(task, "contact", None), "ghl_id", None)
         try:
-            resp = await ghl.contacts.add_task(
-                task.contact.ghl_id,
-                task.title,
-                due_date=due_iso,
-                description=task.description,
-                location_id=location.ghl_location_id,
-            )
-            payload = resp.get("task", resp) if isinstance(resp, dict) else {}
-            ghl_id = payload.get("id", payload.get("_id", "")) if isinstance(payload, dict) else ""
+            if use_services:
+                resp = await ghl.tasks_service.create(  # type: ignore[attr-defined]
+                    location_id=location.ghl_location_id,
+                    title=task.title,
+                    contact_id=contact_ghl_id if isinstance(contact_ghl_id, str) and contact_ghl_id else None,
+                    due_date=due_iso,
+                    description=task.description,
+                    status=remote_status,
+                    assigned_to=task.assigned_to,
+                )
+                payload = resp.get("record", resp) if isinstance(resp, dict) else {}
+            else:
+                # Fallback: backend contact endpoint (create-only, requires contact + due date).
+                if not isinstance(contact_ghl_id, str) or not contact_ghl_id:
+                    result.errors.append(f"Task {task.id}: missing contact GHL id")
+                    continue
+                resp = await ghl.contacts.add_task(  # type: ignore[attr-defined]
+                    contact_ghl_id,
+                    task.title,
+                    due_date=due_date_val.isoformat() if isinstance(due_date_val, date) else None,
+                    description=task.description,
+                    location_id=location.ghl_location_id,
+                )
+                payload = resp.get("task", resp) if isinstance(resp, dict) else {}
+
+            ghl_id = _extract_ghl_id(payload)
             if isinstance(ghl_id, str) and ghl_id:
                 task.ghl_id = ghl_id
                 task.ghl_location_id = location.ghl_location_id
-                task.last_synced_at = datetime.now(timezone.utc)
+                task.last_synced_at = now
                 result.created += 1
             else:
                 result.errors.append(f"Task {task.id}: export succeeded but no id returned")

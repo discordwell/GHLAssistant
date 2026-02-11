@@ -20,6 +20,9 @@ dist/
 # SQLite
 *.db
 
+# Temp / scratch (often contains downloaded vendor bundles, logs, etc.)
+tmp/
+
 # Browser data (contains cookies, tokens, sensitive info)
 data/browser_profiles/
 data/network_logs/

@@ -833,6 +833,7 @@ class BrowserAgent:
 async def run_capture_session(
     url: str = "https://app.gohighlevel.com/",
     profile: str = "ghl_session",
+    headless: bool = False,
     duration: int = 300,
     output: str | None = None,
 ) -> dict:
@@ -870,7 +871,7 @@ async def run_capture_session(
         prev_term = None
 
     try:
-        async with BrowserAgent(profile_name=profile, capture_network=True) as agent:
+        async with BrowserAgent(profile_name=profile, headless=headless, capture_network=True) as agent:
             # Navigate to URL
             state = await agent.navigate(url)
             print(f"Page loaded: {state.get('title', 'Unknown')}")
