@@ -82,10 +82,15 @@ class TasksServiceAPI:
         resp.raise_for_status()
         return resp.json()
 
-    async def _delete(self, path: str) -> dict[str, Any]:
+    async def _delete(
+        self,
+        path: str,
+        *,
+        params: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         client = self._require_http_client()
         url = f"{self._services_base_url()}{path}"
-        resp = await client.delete(url, headers=self._services_headers())
+        resp = await client.delete(url, headers=self._services_headers(), params=params)
         resp.raise_for_status()
         if resp.content:
             return resp.json()
@@ -373,7 +378,12 @@ class TasksServiceAPI:
             status="completed" if completed else "incomplete",
         )
 
-    async def delete(self, task_id: str) -> dict[str, Any]:
+    async def delete(
+        self,
+        task_id: str,
+        *,
+        location_id: str | None = None,
+    ) -> dict[str, Any]:
         """Delete a task record.
 
         Uses ``DELETE /objects/task/records/{taskId}``.
@@ -386,5 +396,9 @@ class TasksServiceAPI:
         """
         if not isinstance(task_id, str) or not task_id.strip():
             raise ValueError("task_id required")
-        return await self._delete(f"/objects/task/records/{task_id}")
-
+        params: dict[str, str] | None = None
+        if isinstance(location_id, str) and location_id.strip():
+            # Some services-domain write endpoints require locationId in the query
+            # string; delete *may* accept it. Include when known for robustness.
+            params = {"locationId": location_id.strip()}
+        return await self._delete(f"/objects/task/records/{task_id}", params=params)

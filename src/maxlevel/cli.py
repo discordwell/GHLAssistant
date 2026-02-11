@@ -1377,6 +1377,11 @@ def browser_capture(
         "--profile", "-p",
         help="Browser profile name (for cookie persistence)",
     ),
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        help="Run headless (no UI window)",
+    ),
     duration: int = typer.Option(
         0,
         "--duration", "-d",
@@ -1404,6 +1409,7 @@ def browser_capture(
             f"[bold cyan]Starting Browser Capture Session[/bold cyan]\n\n"
             f"URL: {url}\n"
             f"Profile: {profile}\n"
+            f"Headless: {headless}\n"
             f"Duration: {'Until Ctrl+C' if duration == 0 else f'{duration}s'}\n\n"
             "[dim]Interact with GHL in the browser window.\n"
             "All API traffic will be captured.[/dim]",
@@ -1416,6 +1422,7 @@ def browser_capture(
             run_capture_session(
                 url=url,
                 profile=profile,
+                headless=headless,
                 duration=duration,
                 output=output,
             )
@@ -1428,6 +1435,192 @@ def browser_capture(
 
     except KeyboardInterrupt:
         console.print("\n[yellow]Capture interrupted[/yellow]")
+    except Exception as e:
+        console.print(f"\n[red]Error: {e}[/red]")
+
+
+@browser_app.command("contact")
+def browser_contact(
+    view: str = typer.Option(
+        "notes",
+        "--view", "-v",
+        help="Contact view to open: notes or tasks",
+    ),
+    profile: str = typer.Option(
+        "ghl_session",
+        "--profile", "-p",
+        help="Browser profile name (for cookie persistence)",
+    ),
+    location_id: str = typer.Option(
+        None,
+        "--location-id",
+        help="GHL location ID (auto-inferred from latest session if omitted)",
+    ),
+    contact_id: str = typer.Option(
+        None,
+        "--contact-id",
+        help="GHL contact ID (auto-inferred from latest session if omitted)",
+    ),
+    session_file: str = typer.Option(
+        None,
+        "--session-file",
+        help="Session JSON to infer IDs from (defaults to most recent session_*.json)",
+    ),
+    capture: bool = typer.Option(
+        False,
+        "--capture",
+        help="Capture network traffic to a new session_*.json (until Ctrl+C by default)",
+    ),
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        help="Run headless (no UI window)",
+    ),
+    duration: int = typer.Option(
+        0,
+        "--duration", "-d",
+        help="Capture duration in seconds when --capture is set (0 = until Ctrl+C)",
+    ),
+    output: str = typer.Option(
+        None,
+        "--output", "-o",
+        help="Output file path for captured session when --capture is set",
+    ),
+):
+    """Open GHL directly on a contact's Notes/Tasks view (best-effort).
+
+    This helps you quickly navigate the UI for targeted session capture.
+    """
+    import json
+    import os
+    from pathlib import Path
+
+    from .browser.ghl_urls import (
+        contact_notes_url,
+        contact_tasks_url,
+        extract_location_contact_from_url,
+    )
+
+    def _latest_session_file() -> Path | None:
+        # Running from repo: <root>/src/maxlevel/cli.py
+        try:
+            root = Path(__file__).resolve().parents[2]
+            log_dir = root / "data" / "network_logs"
+        except Exception:
+            log_dir = Path.cwd() / "data" / "network_logs"
+        if not log_dir.is_dir():
+            return None
+        sessions = sorted(
+            log_dir.glob("session_*.json"),
+            key=lambda p: (p.stat().st_mtime if p.exists() else 0),
+        )
+        return sessions[-1] if sessions else None
+
+    def _infer_ids_from_session(path: Path) -> tuple[str | None, str | None]:
+        try:
+            raw = path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+        except Exception:
+            return None, None
+        if not isinstance(data, dict):
+            return None, None
+
+        page_state = data.get("page_state") or {}
+        url = page_state.get("url") if isinstance(page_state, dict) else ""
+        loc, cid = extract_location_contact_from_url(url)
+
+        auth = data.get("auth") or {}
+        if not loc and isinstance(auth, dict):
+            loc_val = auth.get("locationId")
+            if isinstance(loc_val, str) and loc_val.strip():
+                loc = loc_val.strip()
+        return loc, cid
+
+    # Allow env overrides (useful in automation)
+    location_id = location_id or os.environ.get("GHL_LOCATION_ID")
+    contact_id = contact_id or os.environ.get("GHL_CONTACT_ID")
+
+    # Auto-infer missing ids from session file.
+    if not location_id or not contact_id:
+        session_path = Path(session_file) if session_file else _latest_session_file()
+        if session_path and session_path.exists():
+            loc2, cid2 = _infer_ids_from_session(session_path)
+            location_id = location_id or loc2
+            contact_id = contact_id or cid2
+
+    view_l = (view or "").strip().lower()
+    if view_l not in {"notes", "note", "tasks", "task"}:
+        console.print("[red]Invalid --view. Use 'notes' or 'tasks'.[/red]")
+        raise typer.Exit(2)
+
+    if not isinstance(location_id, str) or not location_id.strip():
+        console.print("[red]Missing location id. Pass --location-id or provide a session file.[/red]")
+        raise typer.Exit(2)
+    if not isinstance(contact_id, str) or not contact_id.strip():
+        console.print("[red]Missing contact id. Pass --contact-id or provide a session file.[/red]")
+        raise typer.Exit(2)
+
+    if view_l in {"tasks", "task"}:
+        url = contact_tasks_url(location_id=location_id.strip(), contact_id=contact_id.strip())
+    else:
+        url = contact_notes_url(location_id=location_id.strip(), contact_id=contact_id.strip())
+
+    if capture:
+        from .browser.agent import run_capture_session
+
+        console.print(
+            Panel(
+                f"[bold cyan]Starting Contact Capture[/bold cyan]\n\n"
+                f"View: {view_l}\n"
+                f"URL: {url}\n"
+                f"Profile: {profile}\n"
+                f"Headless: {headless}\n"
+                f"Duration: {'Until Ctrl+C' if duration == 0 else f'{duration}s'}\n\n"
+                "[dim]Interact with GHL in the browser window.\n"
+                "Traffic will be captured into a session_*.json.[/dim]",
+                title="Browser Agent",
+            )
+        )
+        try:
+            asyncio.run(
+                run_capture_session(
+                    url=url,
+                    profile=profile,
+                    headless=headless,
+                    duration=duration,
+                    output=output,
+                )
+            )
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Capture interrupted[/yellow]")
+        return
+
+    from .browser.agent import BrowserAgent
+
+    async def _open():
+        async with BrowserAgent(profile_name=profile, headless=headless, capture_network=False) as agent:
+            await agent.navigate(url)
+            console.print(
+                Panel(
+                    f"[bold cyan]Contact View Open[/bold cyan]\n\n"
+                    f"View: {view_l}\n"
+                    f"URL: {url}\n"
+                    f"Profile: {profile}\n"
+                    f"Headless: {headless}\n\n"
+                    "[dim]Use the browser window to interact. Press Ctrl+C here to close.[/dim]",
+                    title="Browser Agent",
+                )
+            )
+            try:
+                while True:
+                    await asyncio.sleep(1)
+            except KeyboardInterrupt:
+                return {"success": True}
+
+    try:
+        asyncio.run(_open())
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Browser closed[/yellow]")
     except Exception as e:
         console.print(f"\n[red]Error: {e}[/red]")
 

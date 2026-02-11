@@ -12,6 +12,7 @@ Produces two session files:
 
 import asyncio
 import json
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -232,6 +233,49 @@ def print_calls(label: str, calls: list[dict]) -> None:
             print(f"    req body: {body_preview}")
         if resp_preview:
             print(f"    res body: {resp_preview}")
+
+
+def _matching_calls(
+    calls: list[dict],
+    *,
+    method: str,
+    url_pattern: str,
+) -> list[dict]:
+    want_method = (method or "").strip().upper()
+    rx = re.compile(url_pattern)
+    hits: list[dict] = []
+    for c in calls:
+        if not isinstance(c, dict):
+            continue
+        m = str(c.get("method") or "").strip().upper()
+        u = str(c.get("url") or "")
+        if m != want_method:
+            continue
+        if not rx.search(u):
+            continue
+        hits.append(c)
+    return hits
+
+
+def _require_proof(
+    *,
+    label: str,
+    results: dict,
+    expectations: dict[str, tuple[str, str]],
+) -> tuple[bool, dict[str, int]]:
+    """Return (ok, counts_by_phase) for required network calls."""
+    ok = True
+    counts: dict[str, int] = {}
+    for phase, (method, url_rx) in expectations.items():
+        calls = results.get(phase, [])
+        if not isinstance(calls, list):
+            calls = []
+        hits = _matching_calls(calls, method=method, url_pattern=url_rx)
+        counts[phase] = len(hits)
+        if len(hits) == 0:
+            ok = False
+            print(f"[PROOF FAIL] {label}: missing {method} {url_rx} in phase '{phase}'")
+    return ok, counts
 
 
 async def safe_eval(agent: BrowserAgent, js: str, label: str = "eval"):
@@ -893,11 +937,41 @@ async def main():
         await agent.export_session(tasks_output)
         print(f"\nTasks session saved: {tasks_output}")
 
+    # --- Proof requirements: refuse to claim success without capturing CRUD endpoints ---
+    notes_expect = {
+        "create": ("POST", r"services\\.leadconnectorhq\\.com/notes/?\\?.*locationId="),
+        "edit": ("PUT", r"services\\.leadconnectorhq\\.com/notes/[^/?#]+\\?.*locationId="),
+        "delete": ("DELETE", r"services\\.leadconnectorhq\\.com/notes/[^/?#]+\\?.*locationId="),
+    }
+    tasks_expect = {
+        "create": ("POST", r"services\\.leadconnectorhq\\.com/objects/task/records(?:\\?|$)"),
+        "toggle": ("PUT", r"services\\.leadconnectorhq\\.com/objects/task/records/[^/?#]+\\?.*locationId="),
+        "edit": ("PUT", r"services\\.leadconnectorhq\\.com/objects/task/records/[^/?#]+\\?.*locationId="),
+        "delete": ("DELETE", r"services\\.leadconnectorhq\\.com/objects/task/records/[^/?#]+(?:\\?.*)?$"),
+    }
+
+    notes_ok, notes_counts = _require_proof(
+        label="notes",
+        results=notes_results,
+        expectations=notes_expect,
+    )
+    tasks_ok, tasks_counts = _require_proof(
+        label="tasks",
+        results=tasks_results,
+        expectations=tasks_expect,
+    )
+    proof_ok = bool(notes_ok and tasks_ok)
+
     # --- Summary report (outside the `async with`) ---
     report = {
         "timestamp": ts,
         "location_id": LOCATION_ID,
         "contact_id": CONTACT_ID,
+        "proof_ok": proof_ok,
+        "proof_counts": {
+            "notes": notes_counts,
+            "tasks": tasks_counts,
+        },
         "notes": {
             "create_endpoints": len(notes_results.get("create", [])),
             "edit_endpoints": len(notes_results.get("edit", [])),
@@ -930,6 +1004,14 @@ async def main():
     print(f"Tasks toggle calls: {len(tasks_results.get('toggle', []))}")
     print(f"Tasks edit calls:   {len(tasks_results.get('edit', []))}")
     print(f"Tasks delete calls: {len(tasks_results.get('delete', []))}")
+
+    if not proof_ok:
+        print("\n" + "!" * 60)
+        print("PROOF FAILED")
+        print("Expected Notes/Tasks CRUD endpoints were not captured.")
+        print("See the session_*_crud_*.json files + report for debugging.")
+        print("!" * 60)
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":
