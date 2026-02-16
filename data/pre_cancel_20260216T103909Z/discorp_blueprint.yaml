@@ -1,0 +1,90 @@
+blueprint:
+  name: Discorp Pre-Cancel
+  version: 1
+  description: ''
+  source_location_id: xQhURhAeK9889aDD69Fr
+  created_at: '2026-02-16T10:39:11.136384+00:00'
+custom_fields:
+- name: Your website
+  field_key: contact.your_website
+  data_type: TEXT
+  position: 50
+custom_values:
+- name: Marketing - New Booking Thank You Page URL
+  value: ''
+- name: Marketing - Website Booking Page URL
+  value: ''
+- name: Promotion Name
+  value: ''
+pipelines:
+- name: Marketing Pipeline
+  stages:
+  - name: New Lead
+    position: 0
+  - name: Hot Lead
+    position: 1
+  - name: New Booking
+    position: 2
+  - name: Visit Attended
+    position: 3
+  - name: Sale
+    position: 4
+  - name: Left a Review
+    position: 5
+- name: Marketing Pipeline
+  stages:
+  - name: New Lead
+    position: 0
+  - name: Hot Lead
+    position: 1
+  - name: New Booking
+    position: 2
+  - name: Visit Attended
+    position: 3
+  - name: Sale
+    position: 4
+  - name: Left a Review
+    position: 5
+workflows:
+- name: 1. New Lead Nurture (Fast 5) - Claim Offer
+  status: draft
+- name: 2. Appointment Confirmation + Reminders
+  status: draft
+- name: 3. Appt No Show
+  status: draft
+- name: 4. New Sale - Send Review Request
+  status: draft
+- name: 5. Long-Term Nurture
+  status: draft
+- name: 6. Stale Leads
+  status: draft
+calendars:
+- name: Search Engine Optimization
+  event_type: RoundRobin_OptimizeForEqualDistribution
+- name: Schedule an Appointment
+- name: Content Marketing
+  event_type: RoundRobin_OptimizeForEqualDistribution
+- name: Digital Marketing Services
+  event_type: RoundRobin_OptimizeForEqualDistribution
+- name: Social Media Management
+  event_type: RoundRobin_OptimizeForEqualDistribution
+forms:
+- name: Marketing Form - Claim Offer
+funnels:
+- name: Digital Marketing
+  steps:
+  - Home
+  - Appointment
+  - Thank You
+- name: HVAC Repair
+  steps:
+  - Optin
+  - Order Form
+  - Upsell
+  - Downsell
+  - Thank You
+- name: SEO Report Offer
+  steps:
+  - Offer
+  - Consultation Appointment
+  - Thank you

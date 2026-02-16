@@ -393,20 +393,60 @@ async def run_import(db: AsyncSession, location: Location) -> SyncResult:
         total.updated += r.updated
 
         # 5. Pipelines
-        pipelines_data = []
-        for p in bp.pipelines:
-            p_id = snap.id_map.get("pipelines", {}).get(p.name, "")
-            pipelines_data.append({
-                "id": p_id,
-                "name": p.name,
-                "stages": [
+        # Prefer Opportunities API pipelines because snapshot name->ID mappings can
+        # collapse duplicate pipeline names and miss opportunities tied to other IDs.
+        pipelines_data: list[dict] = []
+        try:
+            pipelines_resp = await ghl.opportunities.pipelines(location_id=lid)
+            api_pipelines = pipelines_resp.get("pipelines", [])
+            if isinstance(api_pipelines, list):
+                seen_pipeline_ids: set[str] = set()
+                for p_data in api_pipelines:
+                    if not isinstance(p_data, dict):
+                        continue
+                    p_id = p_data.get("id", p_data.get("_id", ""))
+                    p_name = p_data.get("name", "")
+                    if not isinstance(p_name, str) or not p_name:
+                        continue
+                    if isinstance(p_id, str) and p_id and p_id in seen_pipeline_ids:
+                        continue
+                    stages: list[dict] = []
+                    raw_stages = p_data.get("stages", [])
+                    if isinstance(raw_stages, list):
+                        for s_data in raw_stages:
+                            if not isinstance(s_data, dict):
+                                continue
+                            s_name = s_data.get("name", "")
+                            if not isinstance(s_name, str) or not s_name:
+                                continue
+                            stages.append(
+                                {
+                                    "id": s_data.get("id", s_data.get("_id", "")),
+                                    "name": s_name,
+                                }
+                            )
+                    pipelines_data.append({"id": p_id, "name": p_name, "stages": stages})
+                    if isinstance(p_id, str) and p_id:
+                        seen_pipeline_ids.add(p_id)
+        except Exception as e:
+            total.errors.append(f"Pipelines API fetch error: {e}")
+
+        if not pipelines_data:
+            for p in bp.pipelines:
+                p_id = snap.id_map.get("pipelines", {}).get(p.name, "")
+                pipelines_data.append(
                     {
-                        "id": snap.id_map.get("stages", {}).get(f"{p.name}:{s.name}", ""),
-                        "name": s.name,
+                        "id": p_id,
+                        "name": p.name,
+                        "stages": [
+                            {
+                                "id": snap.id_map.get("stages", {}).get(f"{p.name}:{s.name}", ""),
+                                "name": s.name,
+                            }
+                            for s in p.stages
+                        ],
                     }
-                    for s in p.stages
-                ],
-            })
+                )
         r, stage_map = await import_pipelines(db, location, pipelines_data)
         total.created += r.created
         total.updated += r.updated

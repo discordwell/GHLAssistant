@@ -330,13 +330,23 @@ async def import_pipelines(
             payload=p_data,
         )
 
-        stmt = select(Pipeline).where(
-            Pipeline.location_id == location.id, Pipeline.ghl_id == ghl_id
-        )
-        pipeline = (await db.execute(stmt)).scalar_one_or_none()
+        pipeline = None
+        if isinstance(ghl_id, str) and ghl_id:
+            stmt = select(Pipeline).where(
+                Pipeline.location_id == location.id, Pipeline.ghl_id == ghl_id
+            )
+            pipeline = (await db.execute(stmt)).scalar_one_or_none()
+
+        if pipeline is None:
+            stmt = select(Pipeline).where(
+                Pipeline.location_id == location.id, Pipeline.name == name
+            )
+            pipeline = (await db.execute(stmt)).scalar_one_or_none()
 
         if pipeline:
             pipeline.name = name
+            if (not pipeline.ghl_id) and isinstance(ghl_id, str) and ghl_id:
+                pipeline.ghl_id = ghl_id
             result.updated += 1
         else:
             pipeline = Pipeline(
@@ -360,11 +370,20 @@ async def import_pipelines(
                 payload=s_data,
             )
 
-            stmt = select(PipelineStage).where(
-                PipelineStage.pipeline_id == pipeline.id,
-                PipelineStage.ghl_id == s_ghl_id,
-            )
-            stage = (await db.execute(stmt)).scalar_one_or_none()
+            stage = None
+            if isinstance(s_ghl_id, str) and s_ghl_id:
+                stmt = select(PipelineStage).where(
+                    PipelineStage.pipeline_id == pipeline.id,
+                    PipelineStage.ghl_id == s_ghl_id,
+                )
+                stage = (await db.execute(stmt)).scalar_one_or_none()
+
+            if stage is None and isinstance(s_name, str) and s_name:
+                stmt = select(PipelineStage).where(
+                    PipelineStage.pipeline_id == pipeline.id,
+                    PipelineStage.name == s_name,
+                )
+                stage = (await db.execute(stmt)).scalar_one_or_none()
 
             if stage:
                 stage.name = s_name
@@ -377,8 +396,11 @@ async def import_pipelines(
                 )
                 db.add(stage)
                 await db.flush()
+            if (not stage.ghl_id) and isinstance(s_ghl_id, str) and s_ghl_id:
+                stage.ghl_id = s_ghl_id
 
-            stage_map[s_ghl_id] = stage.id
+            if isinstance(s_ghl_id, str) and s_ghl_id:
+                stage_map[s_ghl_id] = stage.id
 
     await db.commit()
     return result, stage_map
@@ -495,6 +517,22 @@ async def import_opportunities(
         Pipeline.location_id == location.id, Pipeline.ghl_id == pipeline_ghl_id
     )
     pipeline = (await db.execute(stmt)).scalar_one_or_none()
+    if not pipeline:
+        # Some accounts expose duplicate logical pipelines with different GHL IDs.
+        # If direct pipeline ID lookup fails, infer the local pipeline via mapped
+        # stage IDs present on the opportunities in this batch.
+        for o_data in opps_data:
+            ghl_stage_id = o_data.get("pipelineStageId", "")
+            stage_local_id = stage_map.get(ghl_stage_id)
+            if not stage_local_id:
+                continue
+            stage = await db.get(PipelineStage, stage_local_id)
+            if not stage:
+                continue
+            pipeline = await db.get(Pipeline, stage.pipeline_id)
+            if pipeline:
+                break
+
     if not pipeline:
         result.errors.append(f"Pipeline {pipeline_ghl_id} not found locally")
         return result

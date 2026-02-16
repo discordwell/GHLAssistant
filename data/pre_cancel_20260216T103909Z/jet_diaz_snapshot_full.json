@@ -1,0 +1,69 @@
+{
+  "blueprint_file": "data/pre_cancel_20260216T103909Z/jet_diaz_blueprint.yaml",
+  "blueprint": {
+    "name": "Jet Diaz Pre-Cancel",
+    "source_location_id": "NHopECHazoaDq2Cf2wOy",
+    "created_at": "2026-02-16T10:39:14.021212+00:00"
+  },
+  "id_map": {
+    "tags": {},
+    "custom_fields": {},
+    "custom_values": {},
+    "pipelines": {},
+    "workflows": {},
+    "calendars": {},
+    "forms": {},
+    "surveys": {},
+    "campaigns": {},
+    "funnels": {}
+  },
+  "warnings": [
+    "Failed to fetch tags: Client error '404 Not Found' for url 'https://backend.leadconnectorhq.com/tags/?locationId=NHopECHazoaDq2Cf2wOy'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404"
+  ],
+  "raw": {
+    "captured_at": "2026-02-16T10:39:14.021221+00:00",
+    "location_id": "NHopECHazoaDq2Cf2wOy",
+    "lists": {
+      "tags": null,
+      "custom_fields": {
+        "customFields": [],
+        "traceId": "bfcd72df-2167-48eb-98e5-5c7314177c1c"
+      },
+      "custom_values": {
+        "customValues": [],
+        "traceId": "760524b1-4c30-451c-ba89-fad8c8dc368b"
+      },
+      "pipelines": {
+        "pipelines": [],
+        "traceId": "a69f105d-5e57-461b-b2ed-c5b7e8258eaa"
+      },
+      "workflows": {
+        "workflows": [],
+        "traceId": "8583a994-6446-4d1a-bdf6-0c8074e7dad5"
+      },
+      "calendars": {
+        "calendars": [],
+        "traceId": "43785da2-a755-43fd-840f-1842da6c7a75"
+      },
+      "forms": {
+        "forms": [],
+        "total": 0,
+        "traceId": "81acaa20-1ece-4b2b-93da-404308463a7e"
+      },
+      "surveys": {
+        "surveys": [],
+        "total": 0,
+        "traceId": "3ba5cb27-6041-43a4-b4fe-a7f59ca49ad3"
+      },
+      "campaigns": {
+        "campaigns": [],
+        "traceId": "0640fcd2-c301-47df-b1a8-f9796967f2f0"
+      },
+      "funnels": {
+        "funnels": [],
+        "total": 0
+      }
+    },
+    "details": {}
+  }
+}
