@@ -370,12 +370,38 @@ def auth_quick(
 
 
 @auth_app.command("status")
-def auth_status():
+def auth_status(
+    live: bool = typer.Option(
+        True,
+        "--live/--no-live",
+        help="Validate stored tokens with a real API call",
+    ),
+):
     """Check current authentication status and token health."""
     from .auth import TokenManager
+    from .oauth.client import validate_token
 
     manager = TokenManager()
     status = manager.get_status()
+    live_results: dict[str, dict[str, Any]] = {}
+
+    if live:
+        async def _validate_live_tokens() -> dict[str, dict[str, Any]]:
+            data = manager.storage.load()
+            results: dict[str, dict[str, Any]] = {}
+            if data.oauth and data.oauth.access_token:
+                try:
+                    results["oauth"] = await validate_token(data.oauth.access_token)
+                except Exception as exc:
+                    results["oauth"] = {"valid": False, "error": str(exc)}
+            if data.session and data.session.token:
+                try:
+                    results["session"] = await validate_token(data.session.token)
+                except Exception as exc:
+                    results["session"] = {"valid": False, "error": str(exc)}
+            return results
+
+        live_results = asyncio.run(_validate_live_tokens())
 
     console.print(Panel("[bold]GHL Authentication Status[/bold]", expand=False))
 
@@ -397,6 +423,14 @@ def auth_status():
             console.print(f"  Company ID: {oauth_info.get('company_id', 'N/A')}")
             console.print(f"  Location ID: {oauth_info.get('location_id', 'N/A')}")
             console.print(f"  Scope: {oauth_info.get('scope', 'N/A')}")
+            live_oauth = live_results.get("oauth")
+            if live_oauth:
+                if live_oauth.get("valid"):
+                    console.print("  Live API check: [green]Valid[/green]")
+                else:
+                    console.print(
+                        f"  Live API check: [red]Invalid[/red] ({live_oauth.get('error', 'unknown')})"
+                    )
         else:
             console.print(f"\n[bold cyan]OAuth Token[/bold cyan]")
             console.print(f"  Status: [red]Expired[/red] (will auto-refresh)")
@@ -439,6 +473,14 @@ def auth_status():
         console.print(f"  Company ID: {session_info.get('company_id', 'N/A')}")
         console.print(f"  Location ID: {session_info.get('location_id', 'N/A')}")
         console.print(f"  User ID: {session_info.get('user_id', 'N/A')}")
+        live_session = live_results.get("session")
+        if live_session:
+            if live_session.get("valid"):
+                console.print("  Live API check: [green]Valid[/green]")
+            else:
+                console.print(
+                    f"  Live API check: [red]Invalid[/red] ({live_session.get('error', 'unknown')})"
+                )
     else:
         console.print(f"\n[bold cyan]Session Token[/bold cyan]")
         console.print(f"  Status: [dim]Not available[/dim]")
@@ -446,6 +488,9 @@ def auth_status():
 
     # Summary
     has_auth = oauth_info or session_info
+    if live and live_results:
+        has_auth = any(result.get("valid") for result in live_results.values())
+
     if has_auth:
         console.print(f"\n[green]API access: Ready[/green]")
     else:

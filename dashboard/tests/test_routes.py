@@ -80,3 +80,12 @@ async def test_health_checks_all_services(client):
     assert "crm" in services
     assert "workflows" in services
     assert "hiring" in services
+
+
+@pytest.mark.asyncio
+async def test_ready_endpoint(client):
+    response = await client.get("/ready")
+    assert response.status_code == 200
+    data = response.json()
+    assert "status" in data
+    assert "services" in data

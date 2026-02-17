@@ -6,9 +6,11 @@ import uuid
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from crm.models.form import Form, FormField
+from crm.config import settings
+from crm.models.form import Form, FormField, FormSubmission
 from crm.models.location import Location
 
 
@@ -171,3 +173,61 @@ async def test_forms_public_submit(
 async def test_forms_list_empty(client: AsyncClient, location: Location):
     response = await client.get(f"/loc/{location.slug}/forms/")
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_forms_public_submit_honeypot_ignored(
+    client: AsyncClient,
+    db: AsyncSession,
+    location: Location,
+):
+    form = Form(location_id=location.id, name="Honeypot Form", is_active=True)
+    db.add(form)
+    await db.commit()
+    await db.refresh(form)
+
+    field = FormField(form_id=form.id, label="Email", field_type="email", position=0)
+    db.add(field)
+    await db.commit()
+    await db.refresh(field)
+
+    response = await client.post(
+        f"/f/{form.id}",
+        data={
+            str(field.id): "bot@example.com",
+            settings.form_honeypot_field: "I am a bot",
+        },
+    )
+    assert response.status_code == 200
+
+    count = await db.scalar(
+        select(func.count()).select_from(FormSubmission).where(FormSubmission.form_id == form.id)
+    )
+    assert count == 0
+
+
+@pytest.mark.asyncio
+async def test_forms_public_submit_rate_limited(
+    client: AsyncClient,
+    db: AsyncSession,
+    location: Location,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    form = Form(location_id=location.id, name="Rate Limit Form", is_active=True)
+    db.add(form)
+    await db.commit()
+    await db.refresh(form)
+
+    field = FormField(form_id=form.id, label="Name", field_type="text", position=0)
+    db.add(field)
+    await db.commit()
+    await db.refresh(field)
+
+    monkeypatch.setattr(settings, "form_rate_limit_max_submissions", 1)
+    monkeypatch.setattr(settings, "form_rate_limit_window_seconds", 60)
+    monkeypatch.setattr(settings, "form_rate_limit_block_seconds", 60)
+
+    first = await client.post(f"/f/{form.id}", data={str(field.id): "First"})
+    second = await client.post(f"/f/{form.id}", data={str(field.id): "Second"})
+    assert first.status_code == 200
+    assert second.status_code == 429

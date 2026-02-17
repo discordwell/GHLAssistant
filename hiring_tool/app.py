@@ -24,9 +24,10 @@ app = FastAPI(title="Hiring Tool", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="static")
 
 templates = Jinja2Templates(directory=str(settings.templates_dir))
+templates.env.globals["app_urls"] = settings.app_urls
 
 # Import and register routers
-from .routers import board, candidates, positions, interviews, analytics, sync  # noqa: E402
+from .routers import analytics, board, candidates, health, interviews, positions, sync  # noqa: E402
 
 app.include_router(board.router)
 app.include_router(candidates.router, prefix="/candidates", tags=["candidates"])
@@ -34,6 +35,7 @@ app.include_router(positions.router, prefix="/positions", tags=["positions"])
 app.include_router(interviews.router, prefix="/interviews", tags=["interviews"])
 app.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
 app.include_router(sync.router, prefix="/sync", tags=["sync"])
+app.include_router(health.router)
 
 
 @app.get("/")

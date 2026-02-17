@@ -4,7 +4,7 @@
 <!-- App Cards -->
 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
   <!-- CRM -->
-  <a href="http://localhost:8020" class="app-card block bg-gray-900 border border-gray-800 rounded-xl p-6 hover:border-indigo-500/50">
+  <a href="{{ app_urls.crm }}" class="app-card block bg-gray-900 border border-gray-800 rounded-xl p-6 hover:border-indigo-500/50">
     <div class="flex items-center gap-3 mb-3">
       <div class="w-10 h-10 rounded-lg bg-indigo-500/20 flex items-center justify-center">
         <svg class="w-5 h-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -13,7 +13,7 @@
       </div>
       <div>
         <h3 class="text-white font-semibold">CRM Platform</h3>
-        <p class="text-xs text-gray-500">localhost:8020</p>
+        <p class="text-xs text-gray-500">{{ app_urls.crm | replace('https://', '') | replace('http://', '') }}</p>
       </div>
     </div>
     <p class="text-2xl font-bold text-white">{{ metrics.get('crm_contacts', 0) }}</p>
@@ -21,7 +21,7 @@
   </a>
 
   <!-- Hiring -->
-  <a href="http://localhost:8021" class="app-card block bg-gray-900 border border-gray-800 rounded-xl p-6 hover:border-emerald-500/50">
+  <a href="{{ app_urls.hiring }}" class="app-card block bg-gray-900 border border-gray-800 rounded-xl p-6 hover:border-emerald-500/50">
     <div class="flex items-center gap-3 mb-3">
       <div class="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center">
         <svg class="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -30,7 +30,7 @@
       </div>
       <div>
         <h3 class="text-white font-semibold">Hiring Tool</h3>
-        <p class="text-xs text-gray-500">localhost:8021</p>
+        <p class="text-xs text-gray-500">{{ app_urls.hiring | replace('https://', '') | replace('http://', '') }}</p>
       </div>
     </div>
     <p class="text-2xl font-bold text-white">{{ metrics.get('hiring_candidates', 0) }}</p>
@@ -38,7 +38,7 @@
   </a>
 
   <!-- Workflows -->
-  <a href="http://localhost:8022" class="app-card block bg-gray-900 border border-gray-800 rounded-xl p-6 hover:border-amber-500/50">
+  <a href="{{ app_urls.workflows }}" class="app-card block bg-gray-900 border border-gray-800 rounded-xl p-6 hover:border-amber-500/50">
     <div class="flex items-center gap-3 mb-3">
       <div class="w-10 h-10 rounded-lg bg-amber-500/20 flex items-center justify-center">
         <svg class="w-5 h-5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -47,7 +47,7 @@
       </div>
       <div>
         <h3 class="text-white font-semibold">Workflows</h3>
-        <p class="text-xs text-gray-500">localhost:8022</p>
+        <p class="text-xs text-gray-500">{{ app_urls.workflows | replace('https://', '') | replace('http://', '') }}</p>
       </div>
     </div>
     <p class="text-2xl font-bold text-white">{{ metrics.get('wf_workflows', 0) }}</p>

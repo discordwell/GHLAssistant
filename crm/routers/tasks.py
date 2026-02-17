@@ -18,6 +18,7 @@ from ..tenant.deps import get_current_location
 
 router = APIRouter(tags=["tasks"])
 templates = Jinja2Templates(directory=str(settings.templates_dir))
+templates.env.globals["app_urls"] = settings.app_urls
 
 def _safe_next_url(value: object) -> str | None:
     """Allow only local relative redirect targets to avoid open redirects."""

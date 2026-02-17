@@ -1,0 +1,89 @@
+version: "3.9"
+
+services:
+  crm:
+    build: .
+    command: uvicorn crm.app:app --host 0.0.0.0 --port 8020
+    environment:
+      CRM_DATABASE_URL: sqlite+aiosqlite:////data/crm.db
+      CRM_DASHBOARD_URL: http://localhost:8023
+      CRM_CRM_URL: http://localhost:8020
+      CRM_HIRING_URL: http://localhost:8021
+      CRM_WORKFLOWS_URL: http://localhost:8022
+    volumes:
+      - ./data/runtime:/data
+    ports:
+      - "8020:8020"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8020/health', timeout=5)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  workflows:
+    build: .
+    command: uvicorn workflows.app:app --host 0.0.0.0 --port 8022
+    environment:
+      WF_DATABASE_URL: sqlite+aiosqlite:////data/workflows.db
+      WF_DASHBOARD_URL: http://localhost:8023
+      WF_CRM_URL: http://localhost:8020
+      WF_HIRING_URL: http://localhost:8021
+      WF_WORKFLOWS_URL: http://localhost:8022
+      WF_WEBHOOK_ASYNC_DISPATCH: "true"
+    volumes:
+      - ./data/runtime:/data
+    ports:
+      - "8022:8022"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8022/health', timeout=5)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  hiring:
+    build: .
+    command: uvicorn hiring_tool.app:app --host 0.0.0.0 --port 8021
+    environment:
+      HIRING_DB_PATH: /data/hiring.db
+      HIRING_DASHBOARD_URL: http://localhost:8023
+      HIRING_CRM_URL: http://localhost:8020
+      HIRING_APP_URL: http://localhost:8021
+      HIRING_WORKFLOWS_URL: http://localhost:8022
+    volumes:
+      - ./data/runtime:/data
+    ports:
+      - "8021:8021"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8021/health', timeout=5)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  dashboard:
+    build: .
+    command: uvicorn dashboard.app:app --host 0.0.0.0 --port 8023
+    environment:
+      DASH_CRM_DATABASE_URL: sqlite+aiosqlite:////data/crm.db
+      DASH_WF_DATABASE_URL: sqlite+aiosqlite:////data/workflows.db
+      DASH_HIRING_DATABASE_URL: sqlite:////data/hiring.db
+      DASH_DASHBOARD_URL: http://localhost:8023
+      DASH_CRM_URL: http://localhost:8020
+      DASH_HIRING_URL: http://localhost:8021
+      DASH_WORKFLOWS_URL: http://localhost:8022
+    volumes:
+      - ./data/runtime:/data
+    ports:
+      - "8023:8023"
+    depends_on:
+      crm:
+        condition: service_healthy
+      workflows:
+        condition: service_healthy
+      hiring:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8023/health', timeout=5)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+

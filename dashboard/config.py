@@ -12,6 +12,10 @@ class DashboardSettings(BaseSettings):
     wf_database_url: str = "sqlite+aiosqlite:///workflows.db"
     hiring_database_url: str = "sqlite:///hiring.db"
     app_title: str = "MaxLevel Dashboard"
+    dashboard_url: str = "http://localhost:8023"
+    crm_url: str = "http://localhost:8020"
+    hiring_url: str = "http://localhost:8021"
+    workflows_url: str = "http://localhost:8022"
 
     model_config = {"env_prefix": "DASH_", "env_file": ".env", "extra": "ignore"}
 
@@ -26,6 +30,15 @@ class DashboardSettings(BaseSettings):
     @property
     def static_dir(self) -> Path:
         return self.base_dir / "static"
+
+    @property
+    def app_urls(self) -> dict[str, str]:
+        return {
+            "dashboard": self.dashboard_url,
+            "crm": self.crm_url,
+            "hiring": self.hiring_url,
+            "workflows": self.workflows_url,
+        }
 
 
 settings = DashboardSettings()

@@ -23,6 +23,7 @@ from ..services.candidate_svc import compute_candidate_score
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(settings.templates_dir))
+templates.env.globals["app_urls"] = settings.app_urls
 
 
 @router.get("/")

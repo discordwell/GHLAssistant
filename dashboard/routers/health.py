@@ -48,3 +48,11 @@ async def health_check():
 
     overall = all(v == "ok" for v in status.values())
     return {"status": "healthy" if overall else "degraded", "services": status}
+
+
+@router.get("/ready")
+async def readiness_check():
+    result = await health_check()
+    if result["status"] == "healthy":
+        return {"status": "ready", "services": result["services"]}
+    return {"status": "not_ready", "services": result["services"]}

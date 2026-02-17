@@ -21,6 +21,7 @@ from ..tenant.deps import get_current_location
 
 router = APIRouter(tags=["dashboard"])
 templates = Jinja2Templates(directory=str(settings.templates_dir))
+templates.env.globals["app_urls"] = settings.app_urls
 
 
 @router.get("/loc/{slug}/")

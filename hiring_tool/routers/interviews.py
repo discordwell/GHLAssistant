@@ -15,6 +15,7 @@ from ..models import Candidate, CandidateActivity, InterviewFeedback
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(settings.templates_dir))
+templates.env.globals["app_urls"] = settings.app_urls
 
 INTERVIEW_TYPES = ["phone", "technical", "behavioral", "panel"]
 RECOMMENDATIONS = ["strong_hire", "hire", "neutral", "no_hire", "strong_no_hire"]

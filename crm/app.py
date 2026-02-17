@@ -29,11 +29,12 @@ app.add_middleware(TenantMiddleware)
 app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="static")
 
 templates = Jinja2Templates(directory=str(settings.templates_dir))
+templates.env.globals["app_urls"] = settings.app_urls
 
 # Import and register routers
 from .routers import (  # noqa: E402
     locations, dashboard, contacts, pipelines, tags, custom_fields, tasks, sync,
-    conversations, calendars, forms, surveys, campaigns, funnels, webhooks,
+    conversations, calendars, forms, surveys, campaigns, funnels, health, webhooks,
 )
 
 app.include_router(locations.router)
@@ -51,3 +52,4 @@ app.include_router(surveys.router)
 app.include_router(campaigns.router)
 app.include_router(funnels.router)
 app.include_router(webhooks.router)
+app.include_router(health.router)
