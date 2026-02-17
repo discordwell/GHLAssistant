@@ -12,6 +12,7 @@ from ..models import Candidate, CandidateActivity, Position
 
 router = APIRouter(tags=["board"])
 templates = Jinja2Templates(directory=str(settings.templates_dir))
+templates.env.globals["app_urls"] = settings.app_urls
 
 # Stages that appear as columns on the board (exclude terminal states from columns)
 BOARD_STAGES = [s for s in settings.stages if s not in ("Hired", "Rejected")]

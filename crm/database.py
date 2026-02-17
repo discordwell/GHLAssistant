@@ -1,4 +1,4 @@
-"""Async database engine and session factory for PostgreSQL."""
+"""Async database engine and session factory."""
 
 from __future__ import annotations
 

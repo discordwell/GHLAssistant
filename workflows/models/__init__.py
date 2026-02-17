@@ -3,6 +3,7 @@
 from .base import Base
 from .workflow import Workflow, WorkflowStep
 from .execution import WorkflowExecution, WorkflowStepExecution
+from .dispatch import WorkflowDispatch
 from .log import WorkflowLog
 
 __all__ = [
@@ -11,5 +12,6 @@ __all__ = [
     "WorkflowStep",
     "WorkflowExecution",
     "WorkflowStepExecution",
+    "WorkflowDispatch",
     "WorkflowLog",
 ]

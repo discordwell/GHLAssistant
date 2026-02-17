@@ -35,8 +35,9 @@ class TestWebhookEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "accepted"
-        assert data["result"] == "completed"
-        assert data["steps_completed"] == 1
+        assert data["mode"] == "queued"
+        assert data["dispatch_status"] in {"pending", "running", "completed"}
+        assert "dispatch_id" in data
 
     @pytest.mark.asyncio
     async def test_webhook_rejects_unpublished(
@@ -70,6 +71,11 @@ class TestWebhookEndpoint:
         data = resp.json()
         assert "webhook_url" in data
         assert data["workflow"]["name"] == "Test Info WF"
+
+    @pytest.mark.asyncio
+    async def test_dispatch_status_not_found(self, client: AsyncClient):
+        resp = await client.get(f"/webhooks/dispatches/{uuid.uuid4()}")
+        assert resp.status_code == 404
 
 
 class TestTriggerConfig:

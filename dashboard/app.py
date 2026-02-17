@@ -23,6 +23,7 @@ app = FastAPI(title=settings.app_title, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="dash_static")
 
 templates = Jinja2Templates(directory=str(settings.templates_dir))
+templates.env.globals["app_urls"] = settings.app_urls
 
 # Import and register routers
 from .routers import home, health  # noqa: E402

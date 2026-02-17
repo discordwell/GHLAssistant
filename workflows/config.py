@@ -12,6 +12,19 @@ class WorkflowSettings(BaseSettings):
     echo_sql: bool = False
     app_title: str = "MaxLevel Workflows"
     anthropic_api_key: str = ""
+    webhook_api_key: str = ""
+    webhook_signing_secret: str = ""
+    webhook_signature_ttl_seconds: int = 300
+    chat_api_key: str = ""
+    webhook_async_dispatch: bool = True
+    dispatch_worker_enabled: bool = True
+    dispatch_poll_interval_seconds: float = 1.0
+    dispatch_max_attempts: int = 3
+    dispatch_retry_backoff_seconds: int = 15
+    dashboard_url: str = "http://localhost:8023"
+    crm_url: str = "http://localhost:8020"
+    hiring_url: str = "http://localhost:8021"
+    workflows_url: str = "http://localhost:8022"
 
     model_config = {"env_prefix": "WF_", "env_file": ".env", "extra": "ignore"}
 
@@ -26,6 +39,15 @@ class WorkflowSettings(BaseSettings):
     @property
     def static_dir(self) -> Path:
         return self.base_dir / "static"
+
+    @property
+    def app_urls(self) -> dict[str, str]:
+        return {
+            "dashboard": self.dashboard_url,
+            "crm": self.crm_url,
+            "hiring": self.hiring_url,
+            "workflows": self.workflows_url,
+        }
 
 
 settings = WorkflowSettings()

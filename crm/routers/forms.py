@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+import time
 import uuid
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
@@ -14,11 +15,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import settings
 from ..database import get_db
 from ..models.location import Location
+from ..security.rate_limit import form_submission_rate_limiter
 from ..services import form_svc
 from ..tenant.deps import get_current_location
 
 router = APIRouter(tags=["forms"])
 templates = Jinja2Templates(directory=str(settings.templates_dir))
+templates.env.globals["app_urls"] = settings.app_urls
 
 
 async def _all_locations(db: AsyncSession):
@@ -182,6 +185,8 @@ async def public_form(
     return templates.TemplateResponse("forms/public.html", {
         "request": request,
         "form_obj": form_obj,
+        "honeypot_field": settings.form_honeypot_field,
+        "rendered_at_unix": int(time.time()),
     })
 
 
@@ -195,14 +200,41 @@ async def public_form_submit(
     if not form_obj or not form_obj.is_active:
         return HTMLResponse("<h1>Form not found</h1>", status_code=404)
 
+    source_ip = request.client.host if request.client else "unknown"
+    key = f"{form_id}:{source_ip}"
+    allowed, retry_after = await form_submission_rate_limiter.allow(key)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many submissions. Try again in {retry_after}s.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
     form = await request.form()
+    honeypot_field = settings.form_honeypot_field
+    if honeypot_field and str(form.get(honeypot_field, "")).strip():
+        # Soft-accept bots to avoid probing feedback.
+        return templates.TemplateResponse("forms/public_thanks.html", {
+            "request": request,
+            "form_obj": form_obj,
+        })
+
+    if settings.form_min_submit_seconds > 0:
+        try:
+            rendered_at = int(str(form.get("_ml_form_ts", "0")).strip() or "0")
+        except ValueError:
+            rendered_at = 0
+        if rendered_at > 0:
+            elapsed = int(time.time()) - rendered_at
+            if elapsed < settings.form_min_submit_seconds:
+                raise HTTPException(status_code=429, detail="Submission too fast")
+
     data = {}
     for field in form_obj.fields:
         val = form.get(str(field.id), "").strip()
         if val:
             data[field.label] = val
 
-    source_ip = request.client.host if request.client else None
     await form_svc.create_submission(db, form_obj.location_id, form_id, data, source_ip=source_ip)
     return templates.TemplateResponse("forms/public_thanks.html", {
         "request": request,

@@ -7,7 +7,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from workflows.models.base import Base
+from workflows.models import Base
 from workflows.database import get_db
 
 

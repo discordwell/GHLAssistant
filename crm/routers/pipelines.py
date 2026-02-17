@@ -22,6 +22,7 @@ from ..tenant.deps import get_current_location
 
 router = APIRouter(tags=["pipelines"])
 templates = Jinja2Templates(directory=str(settings.templates_dir))
+templates.env.globals["app_urls"] = settings.app_urls
 
 
 async def _all_locations(db: AsyncSession):

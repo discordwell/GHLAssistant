@@ -16,6 +16,7 @@ from ..models.location import Location
 
 router = APIRouter(tags=["locations"])
 templates = Jinja2Templates(directory=str(settings.templates_dir))
+templates.env.globals["app_urls"] = settings.app_urls
 
 
 def _slugify(name: str) -> str:

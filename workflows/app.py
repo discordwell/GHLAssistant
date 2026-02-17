@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .config import settings
+from .worker import dispatch_worker
 
 
 @asynccontextmanager
@@ -19,7 +20,9 @@ async def lifespan(app: FastAPI):
         from .models import Base
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+    dispatch_worker.start()
     yield
+    await dispatch_worker.stop()
 
 
 app = FastAPI(title=settings.app_title, lifespan=lifespan)
@@ -27,9 +30,19 @@ app = FastAPI(title=settings.app_title, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="wf_static")
 
 templates = Jinja2Templates(directory=str(settings.templates_dir))
+templates.env.globals["app_urls"] = settings.app_urls
 
 # Import and register routers
-from .routers import dashboard, workflows, editor, executions, api, chat, webhooks  # noqa: E402
+from .routers import (  # noqa: E402
+    api,
+    chat,
+    dashboard,
+    editor,
+    executions,
+    health,
+    webhooks,
+    workflows,
+)
 
 app.include_router(dashboard.router)
 app.include_router(workflows.router)
@@ -38,3 +51,4 @@ app.include_router(executions.router)
 app.include_router(api.router)
 app.include_router(chat.router)
 app.include_router(webhooks.router)
+app.include_router(health.router)

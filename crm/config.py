@@ -8,19 +8,38 @@ from pydantic_settings import BaseSettings
 
 
 class CRMSettings(BaseSettings):
-    database_url: str = "postgresql+asyncpg://localhost/crm"
+    database_url: str = "sqlite+aiosqlite:///crm.db"
     echo_sql: bool = False
     app_title: str = "CRM Platform"
+    tenant_auth_required: bool = False
+    tenant_access_tokens: str = ""
+    tenant_token_header: str = "X-Location-Token"
 
     # Twilio (optional — SMS)
     twilio_account_sid: str | None = None
     twilio_auth_token: str | None = None
     twilio_from_number: str | None = None
+    webhooks_verify_twilio_signature: bool = True
 
     # SendGrid (optional — Email)
     sendgrid_api_key: str | None = None
     sendgrid_from_email: str | None = None
     sendgrid_from_name: str | None = None
+    sendgrid_inbound_token: str | None = None
+    sendgrid_inbound_basic_user: str | None = None
+    sendgrid_inbound_basic_pass: str | None = None
+
+    # Public form hardening
+    form_rate_limit_window_seconds: int = 60
+    form_rate_limit_max_submissions: int = 10
+    form_rate_limit_block_seconds: int = 300
+    form_honeypot_field: str = "website"
+    form_min_submit_seconds: int = 0
+
+    dashboard_url: str = "http://localhost:8023"
+    crm_url: str = "http://localhost:8020"
+    hiring_url: str = "http://localhost:8021"
+    workflows_url: str = "http://localhost:8022"
 
     # Browser fallback export planning for API-limited resources
     sync_browser_fallback_enabled: bool = True
@@ -98,6 +117,33 @@ class CRMSettings(BaseSettings):
     @property
     def sendgrid_configured(self) -> bool:
         return bool(self.sendgrid_api_key and self.sendgrid_from_email)
+
+    @property
+    def tenant_access_tokens_map(self) -> dict[str, str]:
+        """Parse comma-separated slug:token pairs."""
+        mapping: dict[str, str] = {}
+        if not self.tenant_access_tokens.strip():
+            return mapping
+
+        for item in self.tenant_access_tokens.split(","):
+            pair = item.strip()
+            if not pair or ":" not in pair:
+                continue
+            slug, token = pair.split(":", 1)
+            slug = slug.strip()
+            token = token.strip()
+            if slug and token:
+                mapping[slug] = token
+        return mapping
+
+    @property
+    def app_urls(self) -> dict[str, str]:
+        return {
+            "dashboard": self.dashboard_url,
+            "crm": self.crm_url,
+            "hiring": self.hiring_url,
+            "workflows": self.workflows_url,
+        }
 
 
 settings = CRMSettings()
