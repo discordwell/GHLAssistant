@@ -57,6 +57,7 @@ crm = [
 workflows = [
     "fastapi[standard]>=0.110.0",
     "sqlalchemy[asyncio]>=2.0.0",
+    "alembic>=1.13.0",
     "pydantic-settings>=2.0.0",
     "python-multipart>=0.0.7",
     "jinja2>=3.1.0",

@@ -8,9 +8,11 @@ from pydantic_settings import BaseSettings
 
 
 class CRMSettings(BaseSettings):
+    environment: str = "development"
     database_url: str = "sqlite+aiosqlite:///crm.db"
     echo_sql: bool = False
     app_title: str = "CRM Platform"
+    security_fail_closed: bool = False
     tenant_auth_required: bool = False
     tenant_access_tokens: str = ""
     tenant_token_header: str = "X-Location-Token"
@@ -144,6 +146,10 @@ class CRMSettings(BaseSettings):
             "hiring": self.hiring_url,
             "workflows": self.workflows_url,
         }
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment.strip().lower() in {"prod", "production"}
 
 
 settings = CRMSettings()

@@ -8,10 +8,12 @@ from pydantic_settings import BaseSettings
 
 
 class WorkflowSettings(BaseSettings):
+    environment: str = "development"
     database_url: str = "sqlite+aiosqlite:///workflows.db"
     echo_sql: bool = False
     app_title: str = "MaxLevel Workflows"
     anthropic_api_key: str = ""
+    security_fail_closed: bool = False
     webhook_api_key: str = ""
     webhook_signing_secret: str = ""
     webhook_signature_ttl_seconds: int = 300
@@ -48,6 +50,10 @@ class WorkflowSettings(BaseSettings):
             "hiring": self.hiring_url,
             "workflows": self.workflows_url,
         }
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment.strip().lower() in {"prod", "production"}
 
 
 settings = WorkflowSettings()

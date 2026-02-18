@@ -43,3 +43,32 @@ async def test_chat_api_key_enforced_when_configured(
     denied = await client.post("/chat/send", json={"messages": []})
     assert denied.status_code == 401
 
+
+@pytest.mark.asyncio
+async def test_webhook_fails_closed_without_auth_when_enabled(
+    client: AsyncClient,
+    db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    wf = await workflow_svc.create_workflow(db, name="Fail Closed Webhook", trigger_type="webhook")
+    await workflow_svc.publish_workflow(db, wf.id)
+    await step_svc.create_step(db, wf.id, step_type="delay", config={"seconds": 0})
+
+    monkeypatch.setattr(settings, "security_fail_closed", True)
+    monkeypatch.setattr(settings, "webhook_api_key", "")
+    monkeypatch.setattr(settings, "webhook_signing_secret", "")
+
+    resp = await client.post(f"/webhooks/{wf.id}", json={"ok": True})
+    assert resp.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_chat_fails_closed_without_api_key_when_enabled(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(settings, "security_fail_closed", True)
+    monkeypatch.setattr(settings, "chat_api_key", "")
+
+    resp = await client.post("/chat/send", json={"messages": []})
+    assert resp.status_code == 503
