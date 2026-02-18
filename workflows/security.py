@@ -25,8 +25,11 @@ def _extract_token(request: Request) -> str:
 
 def require_chat_api_key(request: Request) -> None:
     """Enforce chat endpoint key auth when configured."""
+    fail_closed = settings.security_fail_closed or settings.is_production
     expected = settings.chat_api_key.strip()
     if not expected:
+        if fail_closed:
+            raise HTTPException(status_code=503, detail="Chat API key is required")
         return
 
     provided = _extract_token(request)
@@ -36,6 +39,7 @@ def require_chat_api_key(request: Request) -> None:
 
 def verify_webhook_request(request: Request, body: bytes) -> None:
     """Verify webhook auth using HMAC signature or API key."""
+    fail_closed = settings.security_fail_closed or settings.is_production
     signing_secret = settings.webhook_signing_secret.strip()
     api_key = settings.webhook_api_key.strip()
 
@@ -71,4 +75,7 @@ def verify_webhook_request(request: Request, body: bytes) -> None:
         provided = _extract_token(request)
         if not provided or not hmac.compare_digest(provided, api_key):
             raise HTTPException(status_code=401, detail="Invalid webhook API key")
+        return
 
+    if fail_closed:
+        raise HTTPException(status_code=503, detail="Webhook authentication is not configured")

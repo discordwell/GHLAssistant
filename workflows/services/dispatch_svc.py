@@ -41,10 +41,12 @@ async def get_dispatch(db: AsyncSession, dispatch_id: uuid.UUID) -> WorkflowDisp
 async def claim_next_dispatch(db: AsyncSession) -> WorkflowDispatch | None:
     """Claim the next runnable dispatch item.
 
-    This uses a best-effort claim suitable for single-process workers and
-    lightweight deployments.
+    Uses `FOR UPDATE SKIP LOCKED` on PostgreSQL for multi-worker safety.
+    Falls back to best-effort claiming on SQLite and other local dev backends.
     """
     now = datetime.now(timezone.utc)
+    bind = db.get_bind()
+    dialect_name = bind.dialect.name if bind is not None else ""
     stmt = (
         select(WorkflowDispatch)
         .where(
@@ -56,6 +58,9 @@ async def claim_next_dispatch(db: AsyncSession) -> WorkflowDispatch | None:
         .order_by(WorkflowDispatch.available_at.asc(), WorkflowDispatch.created_at.asc())
         .limit(1)
     )
+    if dialect_name == "postgresql":
+        stmt = stmt.with_for_update(skip_locked=True)
+
     result = await db.execute(stmt)
     dispatch = result.scalar_one_or_none()
     if not dispatch:

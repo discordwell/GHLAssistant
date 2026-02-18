@@ -25,11 +25,14 @@ def _twilio_expected_signature(url: str, params: Mapping[str, str], auth_token: 
 
 def verify_twilio_signature(request: Request, form_data: Mapping[str, str]) -> None:
     """Verify Twilio webhook signature when configured."""
+    fail_closed = settings.security_fail_closed or settings.is_production
     if not settings.webhooks_verify_twilio_signature:
         return
 
     auth_token = settings.twilio_auth_token
     if not auth_token:
+        if fail_closed:
+            raise HTTPException(status_code=503, detail="Twilio auth token is required")
         return
 
     provided = request.headers.get("x-twilio-signature", "").strip()
@@ -43,9 +46,16 @@ def verify_twilio_signature(request: Request, form_data: Mapping[str, str]) -> N
 
 def verify_sendgrid_inbound_auth(request: Request) -> None:
     """Verify SendGrid inbound parse auth token/basic auth when configured."""
+    fail_closed = settings.security_fail_closed or settings.is_production
     token = settings.sendgrid_inbound_token
     basic_user = settings.sendgrid_inbound_basic_user
     basic_pass = settings.sendgrid_inbound_basic_pass
+
+    if fail_closed and not any((token, basic_user, basic_pass)):
+        raise HTTPException(
+            status_code=503,
+            detail="SendGrid inbound auth is not configured",
+        )
 
     # Token-based auth (query param or header).
     if token:
@@ -72,4 +82,3 @@ def verify_sendgrid_inbound_auth(request: Request) -> None:
             raise HTTPException(status_code=401, detail="Invalid SendGrid username")
         if basic_pass and not hmac.compare_digest(password, basic_pass):
             raise HTTPException(status_code=401, detail="Invalid SendGrid password")
-

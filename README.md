@@ -24,6 +24,12 @@ pip install -e ".[dev,crm,workflows,dashboard,hiring]"
 cp .env.example .env
 ```
 
+For production-hardening defaults, start from:
+
+```bash
+cp .env.production.example .env
+```
+
 3. Run services:
 
 ```bash
@@ -32,6 +38,19 @@ uvicorn hiring_tool.app:app --port 8021
 uvicorn workflows.app:app --port 8022
 uvicorn dashboard.app:app --port 8023
 ```
+
+## Database Migrations
+
+Run migrations before starting production services:
+
+```bash
+alembic -c crm/alembic.ini upgrade head
+alembic -c workflows/alembic.ini upgrade head
+```
+
+Notes:
+- CRM and Workflows use Alembic for production schema management.
+- Workflows only auto-creates tables for SQLite local-dev mode.
 
 ## Production-Like Local Deployment
 
@@ -56,6 +75,7 @@ Services:
 - `WF_WEBHOOK_API_KEY`: API-key auth fallback for webhooks
 - `WF_CHAT_API_KEY`: API-key auth for `/chat/send`
 - `WF_WEBHOOK_ASYNC_DISPATCH=true`: queue webhook triggers instead of running inline
+- `WF_SECURITY_FAIL_CLOSED=true` (or `WF_ENVIRONMENT=production`): reject insecure webhook/chat configs
 
 ### CRM
 
@@ -63,6 +83,7 @@ Services:
 - `CRM_SENDGRID_INBOUND_TOKEN`: require token for SendGrid inbound endpoint
 - `CRM_TENANT_AUTH_REQUIRED=true`: require tenant token on `/loc/{slug}/...` routes
 - `CRM_TENANT_ACCESS_TOKENS=slug:token,...`: per-tenant access tokens
+- `CRM_SECURITY_FAIL_CLOSED=true` (or `CRM_ENVIRONMENT=production`): reject insecure webhook configs
 - Form anti-spam:
   - `CRM_FORM_RATE_LIMIT_*`
   - honeypot field via `CRM_FORM_HONEYPOT_FIELD`
@@ -84,3 +105,7 @@ pytest tests crm/tests workflows/tests dashboard/tests hiring_tool/tests
 
 CI workflow is included at `.github/workflows/ci.yml`.
 
+## Notes
+
+- Workflow dispatch claiming uses PostgreSQL `FOR UPDATE SKIP LOCKED` when available for safer multi-worker processing.
+- SQLite/dev mode falls back to best-effort queue claiming.
