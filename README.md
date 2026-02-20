@@ -97,19 +97,31 @@ Services:
 - `DASH_AUTH_ENABLED=true`: enable session auth + RBAC middleware
 - `DASH_AUTH_RATE_LIMIT_*`: login brute-force throttling
 
-Auth bootstrap credentials are currently environment-driven (`*_AUTH_BOOTSTRAP_*`) as a skeleton; replace with a real user store/IdP before GA.
+Runtime auth no longer auto-seeds bootstrap users from env.
+Use the explicit one-time bootstrap command before enabling production auth:
+- `maxlevel auth bootstrap-owner --service crm --email owner@example.com --password '...strong...'`
+- `maxlevel auth bootstrap-owner --service workflows --email owner@example.com --password '...strong...'`
+
+When auth is enabled in production/fail-closed mode, CRM/Workflows/Dashboard startup now fails if no active owner exists.
+
 Persistent accounts/invites are now DB-backed:
 - Admin invite UI: `/auth/invites`
 - Invite accept flow: `/auth/accept?token=...`
 - User lifecycle management (role/status): `/auth/users`
 - Self-service password rotation: `/auth/password`
-- CRM/Workflows disable direct bootstrap fallback once DB auth is wired (bootstrap is seed-only there).
+- Self-service account recovery:
+  - Forgot password: `/auth/forgot`
+  - Token reset form: `/auth/reset?token=...`
+- Session inventory + revocation:
+  - `/auth/sessions`
+  - logout-all-other-sessions action
+- Auth audit log UI: `/auth/audit`
 - User lifecycle updates enforce role hierarchy (non-owners cannot modify owner accounts or self-escalate).
 - Active sessions are re-validated against DB user state/role on each request (disable/demotion takes effect immediately).
 - Auth form posts use CSRF tokens, including login and invite acceptance (`/auth/login`, `/auth/accept`, `/auth/invites`, `/auth/users`, `/auth/password`).
 - Auth login redirects sanitize `next` targets to block scheme-relative/external open redirects.
 - Auth actions are audit-logged to append-only `auth_event` records (login, invite create/accept, user updates, password changes).
-- Dashboard auth is backed by persistent CRM auth accounts (no direct bootstrap credential fallback).
+- Dashboard auth is backed by persistent CRM auth accounts (no direct bootstrap credential fallback) and persisted session checks.
 
 ## Health/Readiness Endpoints
 
@@ -127,6 +139,12 @@ pytest tests crm/tests workflows/tests dashboard/tests hiring_tool/tests
 ```
 
 CI workflow is included at `.github/workflows/ci.yml`.
+
+## Launch Ops
+
+- Launch runbook: `docs/LAUNCH_RUNBOOK.md`
+- Auth load test helper: `scripts/load_test_auth.py`
+- Backup/restore drill helper: `scripts/backup_restore_drill.sh`
 
 ## Notes
 

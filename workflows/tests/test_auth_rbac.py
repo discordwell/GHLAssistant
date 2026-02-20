@@ -736,3 +736,128 @@ async def test_auth_audit_events_cover_core_flows(
     assert ("invite_accept", "success") in action_outcomes
     assert ("user_update", "success") in action_outcomes
     assert ("password_change", "success") in action_outcomes
+
+
+@pytest.mark.asyncio
+async def test_password_reset_recovery_flow(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(settings, "auth_enabled", True)
+    monkeypatch.setattr(settings, "auth_secret", "test-secret")
+    monkeypatch.setattr(settings, "auth_bootstrap_email", "owner@example.com")
+    monkeypatch.setattr(settings, "auth_bootstrap_password", "ownerpass123")
+    monkeypatch.setattr(settings, "auth_bootstrap_role", "owner")
+
+    owner_login = await client.post(
+        "/auth/login",
+        data={"email": "owner@example.com", "password": "ownerpass123", "next": "/"},
+        follow_redirects=False,
+    )
+    assert owner_login.status_code == 303
+
+    forgot_page = await client.get("/auth/forgot", follow_redirects=False)
+    assert forgot_page.status_code == 200
+    forgot_submit = await client.post(
+        "/auth/forgot",
+        data={"email": "owner@example.com", "csrf_token": _csrf(forgot_page.cookies)},
+        cookies=forgot_page.cookies,
+        follow_redirects=False,
+    )
+    assert forgot_submit.status_code == 303
+    token = parse_qs(urlparse(forgot_submit.headers["location"]).query).get("token", [""])[0]
+    assert token
+
+    reset_page = await client.get("/auth/reset", params={"token": token}, follow_redirects=False)
+    assert reset_page.status_code == 200
+    reset_submit = await client.post(
+        "/auth/reset",
+        data={
+            "token": token,
+            "new_password": "ownerpass999",
+            "confirm_password": "ownerpass999",
+            "csrf_token": _csrf(reset_page.cookies),
+        },
+        cookies=reset_page.cookies,
+        follow_redirects=False,
+    )
+    assert reset_submit.status_code == 303
+
+    old_login = await client.post(
+        "/auth/login",
+        data={"email": "owner@example.com", "password": "ownerpass123", "next": "/"},
+        follow_redirects=False,
+    )
+    assert old_login.status_code == 200
+    assert "Invalid credentials" in old_login.text
+
+    new_login = await client.post(
+        "/auth/login",
+        data={"email": "owner@example.com", "password": "ownerpass999", "next": "/"},
+        follow_redirects=False,
+    )
+    assert new_login.status_code == 303
+
+
+@pytest.mark.asyncio
+async def test_revoke_all_other_sessions_invalidates_old_cookie(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(settings, "auth_enabled", True)
+    monkeypatch.setattr(settings, "auth_secret", "test-secret")
+    monkeypatch.setattr(settings, "auth_bootstrap_email", "owner@example.com")
+    monkeypatch.setattr(settings, "auth_bootstrap_password", "ownerpass123")
+    monkeypatch.setattr(settings, "auth_bootstrap_role", "owner")
+
+    session_one = await client.post(
+        "/auth/login",
+        data={"email": "owner@example.com", "password": "ownerpass123", "next": "/"},
+        follow_redirects=False,
+    )
+    assert session_one.status_code == 303
+    session_two = await client.post(
+        "/auth/login",
+        data={"email": "owner@example.com", "password": "ownerpass123", "next": "/"},
+        follow_redirects=False,
+    )
+    assert session_two.status_code == 303
+
+    revoke_all = await client.post(
+        "/auth/sessions/revoke-all",
+        data={"csrf_token": _csrf(session_two.cookies)},
+        cookies=session_two.cookies,
+        follow_redirects=False,
+    )
+    assert revoke_all.status_code == 303
+    assert revoke_all.headers["location"].startswith("/auth/sessions?msg=Other+sessions+revoked")
+
+    old_cookie_access = await client.get("/", cookies=session_one.cookies, follow_redirects=False)
+    assert old_cookie_access.status_code == 303
+    assert old_cookie_access.headers["location"].startswith("/auth/login")
+
+    current_cookie_access = await client.get("/", cookies=session_two.cookies, follow_redirects=False)
+    assert current_cookie_access.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_owner_can_view_audit_page(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(settings, "auth_enabled", True)
+    monkeypatch.setattr(settings, "auth_secret", "test-secret")
+    monkeypatch.setattr(settings, "auth_bootstrap_email", "owner@example.com")
+    monkeypatch.setattr(settings, "auth_bootstrap_password", "ownerpass123")
+    monkeypatch.setattr(settings, "auth_bootstrap_role", "owner")
+
+    owner_login = await client.post(
+        "/auth/login",
+        data={"email": "owner@example.com", "password": "ownerpass123", "next": "/"},
+        follow_redirects=False,
+    )
+    assert owner_login.status_code == 303
+
+    audit_page = await client.get("/auth/audit", cookies=owner_login.cookies, follow_redirects=False)
+    assert audit_page.status_code == 200
+    assert "Auth Audit" in audit_page.text

@@ -30,3 +30,5 @@ def test_alembic_upgrade_creates_dispatch_table(tmp_path: Path, monkeypatch):
     assert "auth_account" in tables
     assert "auth_invite" in tables
     assert "auth_event" in tables
+    assert "auth_session" in tables
+    assert "auth_password_reset" in tables

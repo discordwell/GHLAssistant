@@ -23,6 +23,12 @@ async def lifespan(app: FastAPI):
         from .models import Base
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+    if settings.auth_enabled and (settings.is_production or settings.security_fail_closed):
+        if not await auth_svc.has_active_owner():
+            raise RuntimeError(
+                "Auth enabled in production/fail-closed mode but no active owner exists. "
+                "Run `maxlevel auth bootstrap-owner --service workflows` before starting."
+            )
     dispatch_worker.start()
     yield
     await dispatch_worker.stop()
@@ -35,6 +41,7 @@ app.add_middleware(
     settings_obj=settings,
     service_name="workflows",
     resolve_user_fn=auth_svc.resolve_user,
+    validate_session_fn=auth_svc.validate_session,
     exempt_prefixes=(
         "/health",
         "/ready",
@@ -45,6 +52,8 @@ app.add_middleware(
         "/auth/users",
         "/auth/password",
         "/auth/accept",
+        "/auth/forgot",
+        "/auth/reset",
         "/webhooks/",
     ),
 )
@@ -87,6 +96,14 @@ app.include_router(
         list_accounts_fn=auth_svc.list_accounts,
         update_account_fn=auth_svc.update_account,
         change_password_fn=auth_svc.change_password,
+        create_session_fn=auth_svc.create_session,
+        validate_session_fn=auth_svc.validate_session,
+        list_sessions_fn=auth_svc.list_sessions,
+        revoke_session_fn=auth_svc.revoke_session,
+        revoke_all_sessions_fn=auth_svc.revoke_all_sessions,
+        request_password_reset_fn=auth_svc.request_password_reset,
+        reset_password_fn=auth_svc.reset_password,
+        list_audit_events_fn=auth_svc.list_auth_events,
         audit_log_fn=auth_svc.record_auth_event,
     )
 )
