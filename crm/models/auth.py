@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, String
+from sqlalchemy import Boolean, DateTime, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, TimestampMixin, UUIDMixin
@@ -42,3 +42,25 @@ class AuthInvite(Base, UUIDMixin, TimestampMixin):
     def __repr__(self) -> str:
         return f"<AuthInvite {self.email!r} ({self.role})>"
 
+
+class AuthEvent(Base, UUIDMixin):
+    """Append-only auth audit event."""
+
+    __tablename__ = "auth_event"
+
+    action: Mapped[str] = mapped_column(String(64), index=True)
+    outcome: Mapped[str] = mapped_column(String(24), index=True)
+    actor_email: Mapped[str | None] = mapped_column(String(255), default=None, index=True)
+    target_email: Mapped[str | None] = mapped_column(String(255), default=None, index=True)
+    source_ip: Mapped[str | None] = mapped_column(String(64), default=None)
+    user_agent: Mapped[str | None] = mapped_column(String(512), default=None)
+    details_json: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        index=True,
+    )
+
+    def __repr__(self) -> str:
+        return f"<AuthEvent {self.action!r} {self.outcome!r}>"

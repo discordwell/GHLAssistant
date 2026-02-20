@@ -29,3 +29,4 @@ def test_alembic_upgrade_creates_dispatch_table(tmp_path: Path, monkeypatch):
     assert "workflow_dispatch" in tables
     assert "auth_account" in tables
     assert "auth_invite" in tables
+    assert "auth_event" in tables

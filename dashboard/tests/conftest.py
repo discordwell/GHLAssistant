@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine, text
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, create_engine, text
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -51,6 +51,32 @@ class CRMActivity(CRMBase):
     description = Column(Text)
     location_id = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class CRMAuthAccount(CRMBase):
+    __tablename__ = "auth_account"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    email = Column(String, unique=True, index=True, nullable=False)
+    password_hash = Column(String, nullable=False)
+    role = Column(String, default="viewer")
+    is_active = Column(Boolean, default=True, nullable=False)
+    invited_by_email = Column(String)
+    last_login_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+class CRMAuthEvent(CRMBase):
+    __tablename__ = "auth_event"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    action = Column(String, index=True, nullable=False)
+    outcome = Column(String, index=True, nullable=False)
+    actor_email = Column(String, index=True)
+    target_email = Column(String, index=True)
+    source_ip = Column(String)
+    user_agent = Column(String)
+    details_json = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
 # --- Workflows schema (minimal reproduction) ---

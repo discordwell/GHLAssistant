@@ -20,7 +20,7 @@ def test_alembic_upgrade_creates_auth_tables(tmp_path: Path, monkeypatch):
     # CRM base migrations use PostgreSQL-specific types; for SQLite smoke testing
     # this revision, stamp just before auth migrations and apply this revision only.
     command.stamp(cfg, "f8ab85f63219")
-    command.upgrade(cfg, "005_auth_accounts_invites")
+    command.upgrade(cfg, "006_auth_events")
 
     engine = create_engine(f"sqlite:///{db_path}")
     try:
@@ -30,3 +30,4 @@ def test_alembic_upgrade_creates_auth_tables(tmp_path: Path, monkeypatch):
 
     assert "auth_account" in tables
     assert "auth_invite" in tables
+    assert "auth_event" in tables

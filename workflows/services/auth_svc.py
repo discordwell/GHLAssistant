@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
@@ -21,7 +22,7 @@ from maxlevel.platform_auth import (
 
 from ..config import settings
 from ..database import async_session_factory, get_db
-from ..models.auth import AuthAccount, AuthInvite
+from ..models.auth import AuthAccount, AuthEvent, AuthInvite
 
 
 def _normalize_role(role: str) -> str:
@@ -47,6 +48,27 @@ def _as_utc(value: datetime | None) -> datetime | None:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def _client_ip(request: Request | None) -> str | None:
+    if not request:
+        return None
+    forwarded = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
+    if forwarded:
+        return forwarded[:64]
+    if request.client and request.client.host:
+        return str(request.client.host)[:64]
+    return None
+
+
+def _details_json(details) -> str | None:
+    if details is None:
+        return None
+    try:
+        encoded = json.dumps(details, separators=(",", ":"), sort_keys=True)
+    except Exception:
+        encoded = json.dumps({"value": str(details)})
+    return encoded[:8192]
 
 
 @asynccontextmanager
@@ -392,3 +414,31 @@ async def accept_invite(
         account.last_login_at = now
         await db.commit()
         return AuthUser(email=account.email, role=account.role)
+
+
+async def record_auth_event(
+    action: str,
+    outcome: str,
+    actor_email: str | None = None,
+    target_email: str | None = None,
+    details=None,
+    request: Request | None = None,
+) -> None:
+    action_norm = (action or "").strip().lower()[:64]
+    outcome_norm = (outcome or "").strip().lower()[:24]
+    if not action_norm or not outcome_norm:
+        return
+
+    async with _db_session(request) as db:
+        db.add(
+            AuthEvent(
+                action=action_norm,
+                outcome=outcome_norm,
+                actor_email=_normalize_email(actor_email or "") or None,
+                target_email=_normalize_email(target_email or "") or None,
+                source_ip=_client_ip(request),
+                user_agent=(request.headers.get("user-agent", "")[:512] if request else None),
+                details_json=_details_json(details),
+            )
+        )
+        await db.commit()

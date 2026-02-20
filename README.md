@@ -106,8 +106,10 @@ Persistent accounts/invites are now DB-backed:
 - CRM/Workflows disable direct bootstrap fallback once DB auth is wired (bootstrap is seed-only there).
 - User lifecycle updates enforce role hierarchy (non-owners cannot modify owner accounts or self-escalate).
 - Active sessions are re-validated against DB user state/role on each request (disable/demotion takes effect immediately).
-- Auth mutation forms use CSRF tokens (`/auth/invites`, `/auth/users`, `/auth/password`).
+- Auth form posts use CSRF tokens, including login and invite acceptance (`/auth/login`, `/auth/accept`, `/auth/invites`, `/auth/users`, `/auth/password`).
 - Auth login redirects sanitize `next` targets to block scheme-relative/external open redirects.
+- Auth actions are audit-logged to append-only `auth_event` records (login, invite create/accept, user updates, password changes).
+- Dashboard auth is backed by persistent CRM auth accounts (no direct bootstrap credential fallback).
 
 ## Health/Readiness Endpoints
 

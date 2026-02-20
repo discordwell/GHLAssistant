@@ -87,5 +87,6 @@ app.include_router(
         list_accounts_fn=auth_svc.list_accounts,
         update_account_fn=auth_svc.update_account,
         change_password_fn=auth_svc.change_password,
+        audit_log_fn=auth_svc.record_auth_event,
     )
 )
