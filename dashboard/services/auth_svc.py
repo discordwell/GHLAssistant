@@ -11,7 +11,13 @@ from fastapi import Request
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from maxlevel.platform_auth import ROLE_ORDER, AuthUser, hash_invite_token, hash_password, verify_password
+from maxlevel.platform_auth import (
+    ROLE_ORDER,
+    AuthUser,
+    hash_invite_token,
+    hash_password_async,
+    verify_password_async,
+)
 
 from .. import database as db_module
 
@@ -27,6 +33,13 @@ def _normalize_email(email: str) -> str:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _should_update_last_login(last_login_at: datetime | None, now: datetime) -> bool:
+    """Avoid hot-write amplification during rapid repeated logins."""
+    if not isinstance(last_login_at, datetime):
+        return True
+    return (now - last_login_at).total_seconds() >= 60
 
 
 def _client_ip(request: Request | None) -> str | None:
@@ -85,7 +98,7 @@ async def authenticate_user(
                 await db.execute(
                     text(
                         """
-                        SELECT email, password_hash, role, is_active
+                        SELECT email, password_hash, role, is_active, last_login_at
                         FROM auth_account
                         WHERE lower(email) = :email
                         LIMIT 1
@@ -98,20 +111,21 @@ async def authenticate_user(
                 return None
             if not bool(row.get("is_active", False)):
                 return None
-            if not verify_password(password, str(row.get("password_hash", ""))):
+            if not await verify_password_async(password, str(row.get("password_hash", ""))):
                 return None
 
-            await db.execute(
-                text(
-                    """
-                    UPDATE auth_account
-                    SET last_login_at = :last_login_at, updated_at = :updated_at
-                    WHERE lower(email) = :email
-                    """
-                ),
-                {"last_login_at": now, "updated_at": now, "email": email_norm},
-            )
-            await db.commit()
+            if _should_update_last_login(row.get("last_login_at"), now):
+                await db.execute(
+                    text(
+                        """
+                        UPDATE auth_account
+                        SET last_login_at = :last_login_at, updated_at = :updated_at
+                        WHERE lower(email) = :email
+                        """
+                    ),
+                    {"last_login_at": now, "updated_at": now, "email": email_norm},
+                )
+                await db.commit()
             return AuthUser(
                 email=_normalize_email(str(row.get("email", email_norm))),
                 role=_normalize_role(str(row.get("role", "viewer"))),
@@ -552,7 +566,7 @@ async def reset_password(
                     """
                 ),
                 {
-                    "password_hash": hash_password(new_password),
+                    "password_hash": await hash_password_async(new_password),
                     "last_login_at": _utcnow(),
                     "updated_at": _utcnow(),
                     "email": _normalize_email(str(account_row.get("email", ""))),

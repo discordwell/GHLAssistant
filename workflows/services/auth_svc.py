@@ -15,10 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from maxlevel.platform_auth import (
     ROLE_ORDER,
     AuthUser,
+    hash_password_async,
     hash_invite_token,
-    hash_password,
     issue_invite_token,
-    verify_password,
+    verify_password_async,
 )
 
 from ..config import settings
@@ -41,6 +41,14 @@ def _role_rank(role: str) -> int:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _should_update_last_login(last_login_at: datetime | None, now: datetime) -> bool:
+    """Avoid hot-write amplification during rapid repeated logins."""
+    last = _as_utc(last_login_at)
+    if last is None:
+        return True
+    return (now - last).total_seconds() >= 60
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
@@ -149,14 +157,14 @@ async def bootstrap_owner(
         if account:
             if not force:
                 return False
-            account.password_hash = hash_password(password)
+            account.password_hash = await hash_password_async(password)
             account.role = "owner"
             account.is_active = True
         else:
             db.add(
                 AuthAccount(
                     email=email_norm,
-                    password_hash=hash_password(password),
+                    password_hash=await hash_password_async(password),
                     role="owner",
                     is_active=True,
                 )
@@ -180,11 +188,13 @@ async def authenticate_user(
         ).scalar_one_or_none()
         if not account or not account.is_active:
             return None
-        if not verify_password(password, account.password_hash):
+        if not await verify_password_async(password, account.password_hash):
             return None
 
-        account.last_login_at = _utcnow()
-        await db.commit()
+        now = _utcnow()
+        if _should_update_last_login(account.last_login_at, now):
+            account.last_login_at = now
+            await db.commit()
         return AuthUser(email=account.email, role=account.role)
 
 
@@ -348,10 +358,10 @@ async def change_password(
         ).scalar_one_or_none()
         if not account or not account.is_active:
             return False
-        if not verify_password(current_password or "", account.password_hash):
+        if not await verify_password_async(current_password or "", account.password_hash):
             return False
 
-        account.password_hash = hash_password(new_password)
+        account.password_hash = await hash_password_async(new_password)
         await db.commit()
         return True
 
@@ -425,7 +435,7 @@ async def accept_invite(
             await db.execute(select(AuthAccount).where(AuthAccount.email == email))
         ).scalar_one_or_none()
 
-        hashed = hash_password(password)
+        hashed = await hash_password_async(password)
         if account:
             account.password_hash = hashed
             account.role = _normalize_role(invite.role)
@@ -739,7 +749,7 @@ async def reset_password(
         ).scalar_one_or_none()
         if not account:
             return None
-        account.password_hash = hash_password(new_password)
+        account.password_hash = await hash_password_async(new_password)
         account.last_login_at = now
         row.used_at = now
         await db.commit()
