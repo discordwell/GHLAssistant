@@ -12,9 +12,10 @@ import inspect
 import json
 import secrets
 import time
+from collections import deque
 from dataclasses import dataclass
 from typing import Iterable
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -37,6 +38,61 @@ SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 class AuthUser:
     email: str
     role: str
+
+
+@dataclass
+class _AttemptState:
+    failures: deque[float]
+    blocked_until: float
+
+
+class _AttemptLimiter:
+    def __init__(self):
+        self._states: dict[str, _AttemptState] = {}
+
+    def is_blocked(self, key: str, now: float) -> bool:
+        state = self._states.get(key)
+        if not state:
+            return False
+        if state.blocked_until > now:
+            return True
+        if state.blocked_until and state.blocked_until <= now and not state.failures:
+            self._states.pop(key, None)
+        return False
+
+    def add_failure(
+        self,
+        *,
+        key: str,
+        now: float,
+        window_seconds: int,
+        max_attempts: int,
+        block_seconds: int,
+    ) -> bool:
+        if max_attempts <= 0:
+            return False
+
+        state = self._states.get(key)
+        if not state:
+            state = _AttemptState(failures=deque(), blocked_until=0.0)
+            self._states[key] = state
+
+        if state.blocked_until > now:
+            return True
+
+        cutoff = now - max(1, window_seconds)
+        while state.failures and state.failures[0] < cutoff:
+            state.failures.popleft()
+
+        state.failures.append(now)
+        if len(state.failures) >= max_attempts:
+            state.failures.clear()
+            state.blocked_until = now + max(1, block_seconds)
+            return True
+        return False
+
+    def clear(self, key: str):
+        self._states.pop(key, None)
 
 
 def hash_password(password: str, iterations: int = 200_000) -> str:
@@ -154,6 +210,51 @@ def _ttl_seconds(settings_obj) -> int:
 
 def _cookie_secure(settings_obj) -> bool:
     return bool(_get_setting(settings_obj, "auth_cookie_secure", False))
+
+
+def _csrf_cookie_name(settings_obj) -> str:
+    return f"{_cookie_name(settings_obj)}_csrf"
+
+
+def _csrf_token_from_request(request: Request, settings_obj) -> str:
+    return (request.cookies.get(_csrf_cookie_name(settings_obj), "") or "").strip()
+
+
+def _ensure_csrf_token(request: Request, settings_obj) -> str:
+    token = _csrf_token_from_request(request, settings_obj)
+    return token or secrets.token_urlsafe(32)
+
+
+def _set_csrf_cookie(response, settings_obj, token: str):
+    response.set_cookie(
+        key=_csrf_cookie_name(settings_obj),
+        value=token,
+        max_age=_ttl_seconds(settings_obj),
+        httponly=True,
+        secure=_cookie_secure(settings_obj),
+        samesite="lax",
+        path="/",
+    )
+
+
+def _valid_csrf(request: Request, settings_obj, provided_token: str) -> bool:
+    cookie_token = _csrf_token_from_request(request, settings_obj)
+    provided = (provided_token or "").strip()
+    return bool(cookie_token and provided and hmac.compare_digest(cookie_token, provided))
+
+
+def _sanitize_next_path(raw_next: str, home_path: str) -> str:
+    next_path = (raw_next or "").strip()
+    if not next_path:
+        return home_path
+    if "\\" in next_path:
+        return home_path
+    parsed = urlsplit(next_path)
+    if parsed.scheme or parsed.netloc:
+        return home_path
+    if not next_path.startswith("/") or next_path.startswith("//"):
+        return home_path
+    return next_path
 
 
 def issue_session_token(settings_obj, user: AuthUser) -> str:
@@ -352,6 +453,7 @@ def build_auth_router(
 ) -> APIRouter:
     """Construct login/logout routes for a service app."""
     router = APIRouter(tags=["auth"])
+    limiter = _AttemptLimiter()
 
     async def _maybe_await(value):
         return await value if inspect.isawaitable(value) else value
@@ -384,6 +486,29 @@ def build_auth_router(
             return None
         return authenticate_bootstrap_user(settings_obj, email=email, password=password)
 
+    def _rate_limit_window_seconds() -> int:
+        return max(1, int(_get_setting(settings_obj, "auth_rate_limit_window_seconds", 300)))
+
+    def _rate_limit_max_attempts() -> int:
+        return max(0, int(_get_setting(settings_obj, "auth_rate_limit_max_attempts", 10)))
+
+    def _rate_limit_block_seconds() -> int:
+        return max(1, int(_get_setting(settings_obj, "auth_rate_limit_block_seconds", 600)))
+
+    def _client_addr(request: Request) -> str:
+        forwarded = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
+        if forwarded:
+            return forwarded
+        if request.client and request.client.host:
+            return request.client.host
+        return "unknown"
+
+    def _login_key(request: Request, email: str) -> str:
+        return f"{service_name}:login:{(email or '').strip().lower()}:{_client_addr(request)}"
+
+    def _password_key(request: Request, email: str) -> str:
+        return f"{service_name}:password:{(email or '').strip().lower()}:{_client_addr(request)}"
+
     async def _current_user(request: Request) -> AuthUser | None:
         user = current_user_from_request(request, settings_obj)
         if not user:
@@ -405,7 +530,12 @@ def build_auth_router(
             return value
         return "-"
 
-    def _render_login(next_path: str, error: str | None = None) -> HTMLResponse:
+    def _render_login(
+        next_path: str,
+        csrf_token: str = "",
+        error: str | None = None,
+        status_code: int = 200,
+    ) -> HTMLResponse:
         error_html = ""
         if error:
             error_html = f"<p style='color:#b91c1c;margin-bottom:1rem;'>{html.escape(error)}</p>"
@@ -433,6 +563,7 @@ def build_auth_router(
       <p class="sub">MaxLevel service access</p>
       {error_html}
       <input type="hidden" name="next" value="{html.escape(next_path)}">
+      <input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">
       <label for="email">Email</label>
       <input id="email" name="email" type="email" required autocomplete="username">
       <label for="password">Password</label>
@@ -442,17 +573,21 @@ def build_auth_router(
   </div>
 </body>
 </html>"""
-        return HTMLResponse(page)
+        return HTMLResponse(page, status_code=status_code)
 
     @router.get("/auth/login")
     async def login_page(request: Request, next: str = home_path):  # noqa: A002
         if not _auth_enabled(settings_obj):
             return RedirectResponse(home_path, status_code=303)
+        safe_next = _sanitize_next_path(next, home_path)
         if await _current_user(request):
-            return RedirectResponse(next or home_path, status_code=303)
+            return RedirectResponse(safe_next, status_code=303)
         if not _secret(settings_obj):
             return HTMLResponse("Authentication is misconfigured", status_code=503)
-        return _render_login(next)
+        csrf_token = _ensure_csrf_token(request, settings_obj)
+        response = _render_login(safe_next, csrf_token=csrf_token)
+        _set_csrf_cookie(response, settings_obj, csrf_token)
+        return response
 
     @router.post("/auth/login")
     async def login_submit(request: Request):
@@ -464,13 +599,50 @@ def build_auth_router(
         form = await request.form()
         email = str(form.get("email", "")).strip()
         password = str(form.get("password", ""))
-        next_path = str(form.get("next", home_path)).strip() or home_path
-        if not next_path.startswith("/"):
-            next_path = home_path
+        next_path = _sanitize_next_path(str(form.get("next", home_path)), home_path)
+
+        login_key = _login_key(request, email)
+        now = time.time()
+        if limiter.is_blocked(login_key, now):
+            err_csrf = _ensure_csrf_token(request, settings_obj)
+            response = _render_login(
+                next_path,
+                csrf_token=err_csrf,
+                error="Too many login attempts. Try again later.",
+                status_code=429,
+            )
+            _set_csrf_cookie(response, settings_obj, err_csrf)
+            return response
 
         user = await _authenticate(request=request, email=email, password=password)
         if not user:
-            return _render_login(next_path, error="Invalid credentials")
+            blocked = limiter.add_failure(
+                key=login_key,
+                now=now,
+                window_seconds=_rate_limit_window_seconds(),
+                max_attempts=_rate_limit_max_attempts(),
+                block_seconds=_rate_limit_block_seconds(),
+            )
+            if blocked:
+                err_csrf = _ensure_csrf_token(request, settings_obj)
+                response = _render_login(
+                    next_path,
+                    csrf_token=err_csrf,
+                    error="Too many login attempts. Try again later.",
+                    status_code=429,
+                )
+                _set_csrf_cookie(response, settings_obj, err_csrf)
+                return response
+            err_csrf = _ensure_csrf_token(request, settings_obj)
+            response = _render_login(
+                next_path,
+                csrf_token=err_csrf,
+                error="Invalid credentials",
+            )
+            _set_csrf_cookie(response, settings_obj, err_csrf)
+            return response
+
+        limiter.clear(login_key)
 
         token = issue_session_token(settings_obj, user)
         response = RedirectResponse(next_path, status_code=303)
@@ -483,6 +655,7 @@ def build_auth_router(
             samesite="lax",
             path="/",
         )
+        _set_csrf_cookie(response, settings_obj, _ensure_csrf_token(request, settings_obj))
         return response
 
     @router.get("/auth/invites")
@@ -526,6 +699,8 @@ def build_auth_router(
         if msg:
             message_block = f"<p style='color:#22c55e;margin:.5rem 0 0 0;'>{html.escape(msg)}</p>"
 
+        csrf_token = _ensure_csrf_token(request, settings_obj)
+
         page = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>User Invites</title>
@@ -545,6 +720,7 @@ a {{ color:#60a5fa; }}
     {message_block}
     {token_block}
     <form method="post" action="/auth/invites" style="margin-top:.8rem;display:grid;grid-template-columns:2fr 1fr auto;gap:.6rem;align-items:end;">
+      <input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">
       <div><label>Email</label><input type="email" name="email" required></div>
       <div><label>Role</label>
         <select name="role">
@@ -569,7 +745,9 @@ a {{ color:#60a5fa; }}
   <p><a href="{html.escape(home_path)}">Back to app</a></p>
   <p><a href="/auth/users">Manage users</a></p>
 </div></body></html>"""
-        return HTMLResponse(page)
+        response = HTMLResponse(page)
+        _set_csrf_cookie(response, settings_obj, csrf_token)
+        return response
 
     @router.post("/auth/invites")
     async def create_invite(request: Request):
@@ -583,6 +761,10 @@ a {{ color:#60a5fa; }}
             return RedirectResponse("/auth/login", status_code=303)
 
         form = await request.form()
+        csrf_token = str(form.get("csrf_token", ""))
+        if not _valid_csrf(request, settings_obj, csrf_token):
+            return RedirectResponse("/auth/invites?msg=Invalid+request", status_code=303)
+
         email = str(form.get("email", "")).strip().lower()
         role = _normalize_role(str(form.get("role", "viewer")))
         if not email:
@@ -654,6 +836,7 @@ button {{ margin-top:1rem; width:100%; padding:.65rem .8rem; border:0; border-ra
             samesite="lax",
             path="/",
         )
+        _set_csrf_cookie(response, settings_obj, _ensure_csrf_token(request, settings_obj))
         return response
 
     @router.get("/auth/users")
@@ -667,6 +850,7 @@ button {{ margin-top:1rem; width:100%; padding:.65rem .8rem; border:0; border-ra
         if not _can_manage_users(user):
             return RedirectResponse("/auth/login", status_code=303)
 
+        csrf_token = _ensure_csrf_token(request, settings_obj)
         accounts = await _invoke_callback(list_accounts_fn, request=request)
         rows_html = []
         for account in accounts or []:
@@ -695,6 +879,7 @@ button {{ margin-top:1rem; width:100%; padding:.65rem .8rem; border:0; border-ra
                 f"<td style='padding:.4rem;border-top:1px solid #1f2937;'>{email_safe}</td>"
                 "<td style='padding:.4rem;border-top:1px solid #1f2937;'>"
                 "<form method='post' action='/auth/users' style='display:flex;gap:.5rem;align-items:center;'>"
+                f"<input type='hidden' name='csrf_token' value='{html.escape(csrf_token)}'>"
                 f"<input type='hidden' name='email' value='{email_safe}'>"
                 f"<select name='role' style='min-width:110px;'>{role_options}</select>"
                 f"<select name='is_active' style='min-width:110px;'>{status_options}</select>"
@@ -744,7 +929,9 @@ a {{ color:#60a5fa; }}
   <p><a href="/auth/invites">Manage invites</a></p>
   <p><a href="{html.escape(home_path)}">Back to app</a></p>
 </div></body></html>"""
-        return HTMLResponse(page)
+        response = HTMLResponse(page)
+        _set_csrf_cookie(response, settings_obj, csrf_token)
+        return response
 
     @router.post("/auth/users")
     async def users_update(request: Request):
@@ -758,6 +945,10 @@ a {{ color:#60a5fa; }}
             return RedirectResponse("/auth/login", status_code=303)
 
         form = await request.form()
+        csrf_token = str(form.get("csrf_token", ""))
+        if not _valid_csrf(request, settings_obj, csrf_token):
+            return RedirectResponse("/auth/users?msg=Invalid+request", status_code=303)
+
         email = str(form.get("email", "")).strip().lower()
         role = _normalize_role(str(form.get("role", "viewer")))
         is_active_raw = str(form.get("is_active", "true")).strip().lower()
@@ -793,6 +984,8 @@ a {{ color:#60a5fa; }}
             color = "#22c55e" if "updated" in msg.lower() else "#f59e0b"
             msg_block = f"<p style='color:{color};margin:.6rem 0 0 0;'>{html.escape(msg)}</p>"
 
+        csrf_token = _ensure_csrf_token(request, settings_obj)
+
         page = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Change Password</title>
@@ -810,6 +1003,7 @@ a {{ color:#60a5fa; }}
       <h1 style="margin:0 0 .25rem 0;">Change Password</h1>
       <p style="margin:0;color:#9ca3af;">Signed in as {html.escape(user.email)}</p>
       {msg_block}
+      <input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">
       <label for="current_password">Current password</label>
       <input id="current_password" name="current_password" type="password" required autocomplete="current-password">
       <label for="new_password">New password</label>
@@ -821,7 +1015,9 @@ a {{ color:#60a5fa; }}
     </form>
   </div>
 </body></html>"""
-        return HTMLResponse(page)
+        response = HTMLResponse(page)
+        _set_csrf_cookie(response, settings_obj, csrf_token)
+        return response
 
     @router.post("/auth/password")
     async def password_submit(request: Request):
@@ -835,9 +1031,17 @@ a {{ color:#60a5fa; }}
             return RedirectResponse("/auth/login", status_code=303)
 
         form = await request.form()
+        csrf_token = str(form.get("csrf_token", ""))
+        if not _valid_csrf(request, settings_obj, csrf_token):
+            return RedirectResponse("/auth/password?msg=Invalid+request", status_code=303)
+
         current_password = str(form.get("current_password", ""))
         new_password = str(form.get("new_password", ""))
         confirm_password = str(form.get("confirm_password", ""))
+        pwd_key = _password_key(request, user.email)
+        now = time.time()
+        if limiter.is_blocked(pwd_key, now):
+            return RedirectResponse("/auth/password?msg=Too+many+attempts", status_code=303)
 
         if len(new_password) < 8:
             return RedirectResponse("/auth/password?msg=Password+too+short", status_code=303)
@@ -852,20 +1056,30 @@ a {{ color:#60a5fa; }}
             request=request,
         )
         if not changed:
+            limiter.add_failure(
+                key=pwd_key,
+                now=now,
+                window_seconds=_rate_limit_window_seconds(),
+                max_attempts=_rate_limit_max_attempts(),
+                block_seconds=_rate_limit_block_seconds(),
+            )
             return RedirectResponse("/auth/password?msg=Current+password+invalid", status_code=303)
 
+        limiter.clear(pwd_key)
         return RedirectResponse("/auth/password?msg=Password+updated", status_code=303)
 
     @router.post("/auth/logout")
     async def logout_post():
         response = RedirectResponse("/auth/login", status_code=303)
         response.delete_cookie(_cookie_name(settings_obj), path="/")
+        response.delete_cookie(_csrf_cookie_name(settings_obj), path="/")
         return response
 
     @router.get("/auth/logout")
     async def logout_get():
         response = RedirectResponse("/auth/login", status_code=303)
         response.delete_cookie(_cookie_name(settings_obj), path="/")
+        response.delete_cookie(_csrf_cookie_name(settings_obj), path="/")
         return response
 
     return router
