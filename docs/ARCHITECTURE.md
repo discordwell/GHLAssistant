@@ -32,6 +32,8 @@ MaxLevel is split into service-focused apps plus a shared CLI SDK:
 - CRM/Workflows treat bootstrap credentials as seed-only once DB auth callbacks are configured (no direct fallback bypass).
 - User lifecycle updates enforce role hierarchy to prevent non-owner escalation and owner-account takeover by lower roles.
 - Session auth is resolved against DB user state/role per request in CRM/Workflows so disable/demotion applies immediately.
+- Auth form endpoints are brute-force throttled via `*_AUTH_RATE_LIMIT_*` controls.
+- Auth login `next` redirects are sanitized to prevent open-redirect abuse.
 - Workflow webhooks:
   - HMAC signing (`WF_WEBHOOK_SIGNING_SECRET`)
   - API key fallback (`WF_WEBHOOK_API_KEY`)

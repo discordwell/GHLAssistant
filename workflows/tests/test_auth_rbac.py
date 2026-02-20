@@ -10,6 +10,10 @@ from httpx import AsyncClient
 from workflows.config import settings
 
 
+def _csrf(cookies) -> str:
+    return cookies.get(f"{settings.auth_cookie_name}_csrf", "")
+
+
 @pytest.mark.asyncio
 async def test_requires_login_when_auth_enabled(
     client: AsyncClient,
@@ -72,7 +76,7 @@ async def test_invite_flow_creates_persistent_user(
 
     invite_resp = await client.post(
         "/auth/invites",
-        data={"email": "newuser@example.com", "role": "manager"},
+        data={"email": "newuser@example.com", "role": "manager", "csrf_token": _csrf(owner_login.cookies)},
         cookies=owner_login.cookies,
         follow_redirects=False,
     )
@@ -116,7 +120,7 @@ async def test_user_management_can_disable_account_and_preserve_owner(
 
     invite_resp = await client.post(
         "/auth/invites",
-        data={"email": "ops@example.com", "role": "manager"},
+        data={"email": "ops@example.com", "role": "manager", "csrf_token": _csrf(owner_login.cookies)},
         cookies=owner_login.cookies,
         follow_redirects=False,
     )
@@ -132,7 +136,7 @@ async def test_user_management_can_disable_account_and_preserve_owner(
 
     disable_resp = await client.post(
         "/auth/users",
-        data={"email": "ops@example.com", "role": "manager", "is_active": "false"},
+        data={"email": "ops@example.com", "role": "manager", "is_active": "false", "csrf_token": _csrf(owner_login.cookies)},
         cookies=owner_login.cookies,
         follow_redirects=False,
     )
@@ -149,7 +153,7 @@ async def test_user_management_can_disable_account_and_preserve_owner(
 
     reject_disable_owner = await client.post(
         "/auth/users",
-        data={"email": "owner@example.com", "role": "owner", "is_active": "false"},
+        data={"email": "owner@example.com", "role": "owner", "is_active": "false", "csrf_token": _csrf(owner_login.cookies)},
         cookies=owner_login.cookies,
         follow_redirects=False,
     )
@@ -177,7 +181,7 @@ async def test_bootstrap_fallback_does_not_bypass_disabled_db_account(
 
     invite_resp = await client.post(
         "/auth/invites",
-        data={"email": "owner2@example.com", "role": "owner"},
+        data={"email": "owner2@example.com", "role": "owner", "csrf_token": _csrf(owner1_login.cookies)},
         cookies=owner1_login.cookies,
         follow_redirects=False,
     )
@@ -200,7 +204,7 @@ async def test_bootstrap_fallback_does_not_bypass_disabled_db_account(
 
     disable_owner1 = await client.post(
         "/auth/users",
-        data={"email": "owner@example.com", "role": "owner", "is_active": "false"},
+        data={"email": "owner@example.com", "role": "owner", "is_active": "false", "csrf_token": _csrf(owner2_login.cookies)},
         cookies=owner2_login.cookies,
         follow_redirects=False,
     )
@@ -236,7 +240,7 @@ async def test_manager_cannot_modify_owner_or_self_escalate(
 
     invite_resp = await client.post(
         "/auth/invites",
-        data={"email": "manager@example.com", "role": "manager"},
+        data={"email": "manager@example.com", "role": "manager", "csrf_token": _csrf(owner_login.cookies)},
         cookies=owner_login.cookies,
         follow_redirects=False,
     )
@@ -259,7 +263,7 @@ async def test_manager_cannot_modify_owner_or_self_escalate(
 
     reject_owner_change = await client.post(
         "/auth/users",
-        data={"email": "owner@example.com", "role": "manager", "is_active": "true"},
+        data={"email": "owner@example.com", "role": "manager", "is_active": "true", "csrf_token": _csrf(manager_login.cookies)},
         cookies=manager_login.cookies,
         follow_redirects=False,
     )
@@ -268,7 +272,7 @@ async def test_manager_cannot_modify_owner_or_self_escalate(
 
     reject_self_escalate = await client.post(
         "/auth/users",
-        data={"email": "manager@example.com", "role": "owner", "is_active": "true"},
+        data={"email": "manager@example.com", "role": "owner", "is_active": "true", "csrf_token": _csrf(manager_login.cookies)},
         cookies=manager_login.cookies,
         follow_redirects=False,
     )
@@ -307,6 +311,7 @@ async def test_password_change_rotates_credentials(
             "current_password": "ownerpass123",
             "new_password": "ownerpass456",
             "confirm_password": "ownerpass456",
+            "csrf_token": _csrf(owner_login.cookies),
         },
         cookies=owner_login.cookies,
         follow_redirects=False,
@@ -354,12 +359,52 @@ async def test_password_change_rejects_wrong_current_password(
             "current_password": "wrongpass",
             "new_password": "ownerpass456",
             "confirm_password": "ownerpass456",
+            "csrf_token": _csrf(owner_login.cookies),
         },
         cookies=owner_login.cookies,
         follow_redirects=False,
     )
     assert rejected.status_code == 303
     assert rejected.headers["location"].startswith("/auth/password?msg=Current+password+invalid")
+
+
+@pytest.mark.asyncio
+async def test_login_rate_limit_blocks_retries(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(settings, "auth_enabled", True)
+    monkeypatch.setattr(settings, "auth_secret", "test-secret")
+    monkeypatch.setattr(settings, "auth_bootstrap_email", "owner@example.com")
+    monkeypatch.setattr(settings, "auth_bootstrap_password", "ownerpass123")
+    monkeypatch.setattr(settings, "auth_bootstrap_role", "owner")
+    monkeypatch.setattr(settings, "auth_rate_limit_window_seconds", 60)
+    monkeypatch.setattr(settings, "auth_rate_limit_max_attempts", 2)
+    monkeypatch.setattr(settings, "auth_rate_limit_block_seconds", 60)
+
+    first = await client.post(
+        "/auth/login",
+        data={"email": "ghost@example.com", "password": "wrong-pass", "next": "/"},
+        follow_redirects=False,
+    )
+    assert first.status_code == 200
+    assert "Invalid credentials" in first.text
+
+    second = await client.post(
+        "/auth/login",
+        data={"email": "ghost@example.com", "password": "wrong-pass", "next": "/"},
+        follow_redirects=False,
+    )
+    assert second.status_code == 429
+    assert "Too many login attempts" in second.text
+
+    blocked_valid = await client.post(
+        "/auth/login",
+        data={"email": "ghost@example.com", "password": "ownerpass123", "next": "/"},
+        follow_redirects=False,
+    )
+    assert blocked_valid.status_code == 429
+    assert "Too many login attempts" in blocked_valid.text
 
 
 @pytest.mark.asyncio
@@ -382,7 +427,7 @@ async def test_disabled_user_active_session_is_revoked_immediately(
 
     invite_resp = await client.post(
         "/auth/invites",
-        data={"email": "agent@example.com", "role": "manager"},
+        data={"email": "agent@example.com", "role": "manager", "csrf_token": _csrf(owner_login.cookies)},
         cookies=owner_login.cookies,
         follow_redirects=False,
     )
@@ -405,7 +450,7 @@ async def test_disabled_user_active_session_is_revoked_immediately(
 
     disable_agent = await client.post(
         "/auth/users",
-        data={"email": "agent@example.com", "role": "manager", "is_active": "false"},
+        data={"email": "agent@example.com", "role": "manager", "is_active": "false", "csrf_token": _csrf(owner_login.cookies)},
         cookies=owner_login.cookies,
         follow_redirects=False,
     )
@@ -437,7 +482,7 @@ async def test_demotion_applies_to_auth_routes_without_relogin(
 
     invite_resp = await client.post(
         "/auth/invites",
-        data={"email": "manager2@example.com", "role": "manager"},
+        data={"email": "manager2@example.com", "role": "manager", "csrf_token": _csrf(owner_login.cookies)},
         cookies=owner_login.cookies,
         follow_redirects=False,
     )
@@ -460,7 +505,7 @@ async def test_demotion_applies_to_auth_routes_without_relogin(
 
     demote_manager = await client.post(
         "/auth/users",
-        data={"email": "manager2@example.com", "role": "viewer", "is_active": "true"},
+        data={"email": "manager2@example.com", "role": "viewer", "is_active": "true", "csrf_token": _csrf(owner_login.cookies)},
         cookies=owner_login.cookies,
         follow_redirects=False,
     )
@@ -469,9 +514,85 @@ async def test_demotion_applies_to_auth_routes_without_relogin(
 
     manager_invite_attempt = await client.post(
         "/auth/invites",
-        data={"email": "shouldfail@example.com", "role": "viewer"},
+        data={"email": "shouldfail@example.com", "role": "viewer", "csrf_token": _csrf(manager_login.cookies)},
         cookies=manager_login.cookies,
         follow_redirects=False,
     )
     assert manager_invite_attempt.status_code == 303
     assert manager_invite_attempt.headers["location"].startswith("/auth/login")
+
+
+@pytest.mark.asyncio
+async def test_csrf_required_for_invite_creation(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(settings, "auth_enabled", True)
+    monkeypatch.setattr(settings, "auth_secret", "test-secret")
+    monkeypatch.setattr(settings, "auth_bootstrap_email", "owner@example.com")
+    monkeypatch.setattr(settings, "auth_bootstrap_password", "ownerpass123")
+    monkeypatch.setattr(settings, "auth_bootstrap_role", "owner")
+
+    owner_login = await client.post(
+        "/auth/login",
+        data={"email": "owner@example.com", "password": "ownerpass123", "next": "/"},
+        follow_redirects=False,
+    )
+    assert owner_login.status_code == 303
+
+    rejected = await client.post(
+        "/auth/invites",
+        data={"email": "csrf-test@example.com", "role": "viewer"},
+        cookies=owner_login.cookies,
+        follow_redirects=False,
+    )
+    assert rejected.status_code == 303
+    assert rejected.headers["location"].startswith("/auth/invites?msg=Invalid+request")
+
+
+@pytest.mark.asyncio
+async def test_login_rejects_scheme_relative_next_redirect(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(settings, "auth_enabled", True)
+    monkeypatch.setattr(settings, "auth_secret", "test-secret")
+    monkeypatch.setattr(settings, "auth_bootstrap_email", "owner@example.com")
+    monkeypatch.setattr(settings, "auth_bootstrap_password", "ownerpass123")
+    monkeypatch.setattr(settings, "auth_bootstrap_role", "owner")
+
+    login = await client.post(
+        "/auth/login",
+        data={"email": "owner@example.com", "password": "ownerpass123", "next": "//evil.example/path"},
+        follow_redirects=False,
+    )
+    assert login.status_code == 303
+    assert login.headers["location"] == "/"
+
+
+@pytest.mark.asyncio
+async def test_login_page_rejects_scheme_relative_next_when_already_authenticated(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(settings, "auth_enabled", True)
+    monkeypatch.setattr(settings, "auth_secret", "test-secret")
+    monkeypatch.setattr(settings, "auth_bootstrap_email", "owner@example.com")
+    monkeypatch.setattr(settings, "auth_bootstrap_password", "ownerpass123")
+    monkeypatch.setattr(settings, "auth_bootstrap_role", "owner")
+
+    login = await client.post(
+        "/auth/login",
+        data={"email": "owner@example.com", "password": "ownerpass123", "next": "/"},
+        follow_redirects=False,
+    )
+    assert login.status_code == 303
+
+    redirect = await client.get(
+        "/auth/login",
+        params={"next": "//evil.example/path"},
+        cookies=login.cookies,
+        follow_redirects=False,
+    )
+    assert redirect.status_code == 303
+    assert redirect.headers["location"] == "/"

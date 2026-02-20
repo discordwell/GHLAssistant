@@ -77,6 +77,7 @@ Services:
 - `WF_WEBHOOK_ASYNC_DISPATCH=true`: queue webhook triggers instead of running inline
 - `WF_SECURITY_FAIL_CLOSED=true` (or `WF_ENVIRONMENT=production`): reject insecure webhook/chat configs
 - `WF_AUTH_ENABLED=true`: enable session auth + RBAC middleware
+- `WF_AUTH_RATE_LIMIT_*`: login/password brute-force throttling
 
 ### CRM
 
@@ -86,6 +87,7 @@ Services:
 - `CRM_TENANT_ACCESS_TOKENS=slug:token,...`: per-tenant access tokens
 - `CRM_SECURITY_FAIL_CLOSED=true` (or `CRM_ENVIRONMENT=production`): reject insecure webhook configs
 - `CRM_AUTH_ENABLED=true`: enable session auth + RBAC middleware
+- `CRM_AUTH_RATE_LIMIT_*`: login/password brute-force throttling
 - Form anti-spam:
   - `CRM_FORM_RATE_LIMIT_*`
   - honeypot field via `CRM_FORM_HONEYPOT_FIELD`
@@ -93,6 +95,7 @@ Services:
 ### Dashboard
 
 - `DASH_AUTH_ENABLED=true`: enable session auth + RBAC middleware
+- `DASH_AUTH_RATE_LIMIT_*`: login brute-force throttling
 
 Auth bootstrap credentials are currently environment-driven (`*_AUTH_BOOTSTRAP_*`) as a skeleton; replace with a real user store/IdP before GA.
 Persistent accounts/invites are now DB-backed:
@@ -103,6 +106,8 @@ Persistent accounts/invites are now DB-backed:
 - CRM/Workflows disable direct bootstrap fallback once DB auth is wired (bootstrap is seed-only there).
 - User lifecycle updates enforce role hierarchy (non-owners cannot modify owner accounts or self-escalate).
 - Active sessions are re-validated against DB user state/role on each request (disable/demotion takes effect immediately).
+- Auth mutation forms use CSRF tokens (`/auth/invites`, `/auth/users`, `/auth/password`).
+- Auth login redirects sanitize `next` targets to block scheme-relative/external open redirects.
 
 ## Health/Readiness Endpoints
 
