@@ -13,7 +13,12 @@ import httpx
 
 async def _one_login(client: httpx.AsyncClient, base_url: str, email: str, password: str, next_path: str) -> tuple[int, float]:
     started = time.perf_counter()
+    # Ensure each measurement is an unauthenticated login attempt.
+    client.cookies.clear()
     page = await client.get(f"{base_url}/auth/login", params={"next": next_path}, follow_redirects=False)
+    if page.status_code != 200:
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        return page.status_code, elapsed_ms
     csrf_cookie_name = None
     for name in page.cookies.keys():
         if name.endswith("_csrf"):
@@ -37,22 +42,23 @@ async def _one_login(client: httpx.AsyncClient, base_url: str, email: str, passw
 
 async def _worker(
     queue: asyncio.Queue[int],
-    client: httpx.AsyncClient,
+    timeout: httpx.Timeout,
     base_url: str,
     email: str,
     password: str,
     next_path: str,
     out: list[tuple[int, float]],
 ) -> None:
-    while True:
-        try:
-            _ = queue.get_nowait()
-        except asyncio.QueueEmpty:
-            return
-        try:
-            out.append(await _one_login(client, base_url, email, password, next_path))
-        finally:
-            queue.task_done()
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        while True:
+            try:
+                _ = queue.get_nowait()
+            except asyncio.QueueEmpty:
+                return
+            try:
+                out.append(await _one_login(client, base_url, email, password, next_path))
+            finally:
+                queue.task_done()
 
 
 async def run(args: argparse.Namespace) -> int:
@@ -62,22 +68,21 @@ async def run(args: argparse.Namespace) -> int:
 
     results: list[tuple[int, float]] = []
     timeout = httpx.Timeout(args.timeout_seconds)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        workers = [
-            asyncio.create_task(
-                _worker(
-                    jobs,
-                    client,
-                    args.base_url.rstrip("/"),
-                    args.email,
-                    args.password,
-                    args.next_path,
-                    results,
-                )
+    workers = [
+        asyncio.create_task(
+            _worker(
+                jobs,
+                timeout,
+                args.base_url.rstrip("/"),
+                args.email,
+                args.password,
+                args.next_path,
+                results,
             )
-            for _ in range(max(1, args.concurrency))
-        ]
-        await asyncio.gather(*workers)
+        )
+        for _ in range(max(1, args.concurrency))
+    ]
+    await asyncio.gather(*workers)
 
     if not results:
         print("No requests executed")
