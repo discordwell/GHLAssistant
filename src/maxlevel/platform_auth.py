@@ -89,6 +89,31 @@ def has_permission(role: str, permission: str) -> bool:
     return ROLE_ORDER.index(actual) >= ROLE_ORDER.index(required)
 
 
+async def _maybe_await(value):
+    return await value if inspect.isawaitable(value) else value
+
+
+def _supports_request_arg(callback) -> bool:
+    if not callback:
+        return False
+    try:
+        sig = inspect.signature(callback)
+    except (TypeError, ValueError):
+        return False
+    if "request" in sig.parameters:
+        return True
+    return any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+    )
+
+
+async def _invoke_callback(callback, *args, request: Request | None = None):
+    if not callback:
+        return None
+    kwargs = {"request": request} if request and _supports_request_arg(callback) else {}
+    return await _maybe_await(callback(*args, **kwargs))
+
+
 def _b64url_encode(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).decode("utf-8").rstrip("=")
 
@@ -254,11 +279,13 @@ class RBACMiddleware(BaseHTTPMiddleware):
         settings_obj,
         service_name: str,
         exempt_prefixes: Iterable[str] = (),
+        resolve_user_fn=None,
     ):
         super().__init__(app)
         self._settings_obj = settings_obj
         self._service_name = service_name
         self._exempt_prefixes = tuple(exempt_prefixes)
+        self._resolve_user_fn = resolve_user_fn
 
     async def dispatch(self, request: Request, call_next):
         if not _auth_enabled(self._settings_obj):
@@ -271,6 +298,9 @@ class RBACMiddleware(BaseHTTPMiddleware):
             return JSONResponse({"detail": "Authentication is misconfigured"}, status_code=503)
 
         user = current_user_from_request(request, self._settings_obj)
+        if user and self._resolve_user_fn:
+            resolved = await _invoke_callback(self._resolve_user_fn, user.email, request=request)
+            user = resolved if isinstance(resolved, AuthUser) else None
         if not user:
             if _should_redirect_to_login(request):
                 path_with_query = request.url.path
@@ -311,12 +341,14 @@ def build_auth_router(
     service_name: str,
     home_path: str = "/",
     allow_bootstrap_fallback: bool = True,
+    resolve_user_fn=None,
     authenticate_fn=None,
     list_invites_fn=None,
     create_invite_fn=None,
     accept_invite_fn=None,
     list_accounts_fn=None,
     update_account_fn=None,
+    change_password_fn=None,
 ) -> APIRouter:
     """Construct login/logout routes for a service app."""
     router = APIRouter(tags=["auth"])
@@ -351,6 +383,15 @@ def build_auth_router(
         if not allow_bootstrap_fallback:
             return None
         return authenticate_bootstrap_user(settings_obj, email=email, password=password)
+
+    async def _current_user(request: Request) -> AuthUser | None:
+        user = current_user_from_request(request, settings_obj)
+        if not user:
+            return None
+        if not resolve_user_fn:
+            return user
+        resolved = await _invoke_callback(resolve_user_fn, user.email, request=request)
+        return resolved if isinstance(resolved, AuthUser) else None
 
     def _can_manage_users(user: AuthUser | None) -> bool:
         if not user:
@@ -407,7 +448,7 @@ def build_auth_router(
     async def login_page(request: Request, next: str = home_path):  # noqa: A002
         if not _auth_enabled(settings_obj):
             return RedirectResponse(home_path, status_code=303)
-        if current_user_from_request(request, settings_obj):
+        if await _current_user(request):
             return RedirectResponse(next or home_path, status_code=303)
         if not _secret(settings_obj):
             return HTMLResponse("Authentication is misconfigured", status_code=503)
@@ -451,7 +492,7 @@ def build_auth_router(
         if not create_invite_fn or not list_invites_fn:
             return HTMLResponse("Invite flow is not configured", status_code=404)
 
-        user = current_user_from_request(request, settings_obj)
+        user = await _current_user(request)
         if not _can_manage_users(user):
             return RedirectResponse("/auth/login", status_code=303)
 
@@ -524,6 +565,7 @@ a {{ color:#60a5fa; }}
       <tbody>{invite_table}</tbody>
     </table>
   </div>
+  <p><a href="/auth/password">Change my password</a></p>
   <p><a href="{html.escape(home_path)}">Back to app</a></p>
   <p><a href="/auth/users">Manage users</a></p>
 </div></body></html>"""
@@ -536,7 +578,7 @@ a {{ color:#60a5fa; }}
         if not create_invite_fn:
             return HTMLResponse("Invite flow is not configured", status_code=404)
 
-        user = current_user_from_request(request, settings_obj)
+        user = await _current_user(request)
         if not _can_manage_users(user):
             return RedirectResponse("/auth/login", status_code=303)
 
@@ -621,7 +663,7 @@ button {{ margin-top:1rem; width:100%; padding:.65rem .8rem; border:0; border-ra
         if not list_accounts_fn or not update_account_fn:
             return HTMLResponse("User management is not configured", status_code=404)
 
-        user = current_user_from_request(request, settings_obj)
+        user = await _current_user(request)
         if not _can_manage_users(user):
             return RedirectResponse("/auth/login", status_code=303)
 
@@ -698,6 +740,7 @@ a {{ color:#60a5fa; }}
       <tbody>{table_body}</tbody>
     </table>
   </div>
+  <p><a href="/auth/password">Change my password</a></p>
   <p><a href="/auth/invites">Manage invites</a></p>
   <p><a href="{html.escape(home_path)}">Back to app</a></p>
 </div></body></html>"""
@@ -710,7 +753,7 @@ a {{ color:#60a5fa; }}
         if not update_account_fn:
             return HTMLResponse("User management is not configured", status_code=404)
 
-        user = current_user_from_request(request, settings_obj)
+        user = await _current_user(request)
         if not _can_manage_users(user):
             return RedirectResponse("/auth/login", status_code=303)
 
@@ -733,6 +776,85 @@ a {{ color:#60a5fa; }}
         )
         msg = "User+updated" if updated else "Update+rejected"
         return RedirectResponse(f"/auth/users?msg={msg}", status_code=303)
+
+    @router.get("/auth/password")
+    async def password_page(request: Request, msg: str = ""):
+        if not _auth_enabled(settings_obj):
+            return RedirectResponse(home_path, status_code=303)
+        if not change_password_fn:
+            return HTMLResponse("Password change is not configured", status_code=404)
+
+        user = await _current_user(request)
+        if not user:
+            return RedirectResponse("/auth/login", status_code=303)
+
+        msg_block = ""
+        if msg:
+            color = "#22c55e" if "updated" in msg.lower() else "#f59e0b"
+            msg_block = f"<p style='color:{color};margin:.6rem 0 0 0;'>{html.escape(msg)}</p>"
+
+        page = f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Change Password</title>
+<style>
+body {{ font-family: system-ui, sans-serif; background:#0b1020; color:#e5e7eb; margin:0; }}
+.wrap {{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:1rem; }}
+.card {{ width:100%; max-width:460px; background:#111827; border:1px solid #1f2937; border-radius:12px; padding:1.25rem; }}
+label {{ display:block; margin:.75rem 0 .25rem 0; font-size:.9rem; }}
+input {{ width:100%; padding:.6rem .7rem; border-radius:8px; border:1px solid #374151; background:#0f172a; color:#f3f4f6; }}
+button {{ margin-top:1rem; width:100%; padding:.65rem .8rem; border:0; border-radius:8px; background:#2563eb; color:#fff; font-weight:600; cursor:pointer; }}
+a {{ color:#60a5fa; }}
+</style></head><body>
+  <div class="wrap">
+    <form method="post" class="card">
+      <h1 style="margin:0 0 .25rem 0;">Change Password</h1>
+      <p style="margin:0;color:#9ca3af;">Signed in as {html.escape(user.email)}</p>
+      {msg_block}
+      <label for="current_password">Current password</label>
+      <input id="current_password" name="current_password" type="password" required autocomplete="current-password">
+      <label for="new_password">New password</label>
+      <input id="new_password" name="new_password" type="password" required minlength="8" autocomplete="new-password">
+      <label for="confirm_password">Confirm new password</label>
+      <input id="confirm_password" name="confirm_password" type="password" required minlength="8" autocomplete="new-password">
+      <button type="submit">Update Password</button>
+      <p style="margin:.9rem 0 0 0;"><a href="{html.escape(home_path)}">Back to app</a></p>
+    </form>
+  </div>
+</body></html>"""
+        return HTMLResponse(page)
+
+    @router.post("/auth/password")
+    async def password_submit(request: Request):
+        if not _auth_enabled(settings_obj):
+            return RedirectResponse(home_path, status_code=303)
+        if not change_password_fn:
+            return HTMLResponse("Password change is not configured", status_code=404)
+
+        user = await _current_user(request)
+        if not user:
+            return RedirectResponse("/auth/login", status_code=303)
+
+        form = await request.form()
+        current_password = str(form.get("current_password", ""))
+        new_password = str(form.get("new_password", ""))
+        confirm_password = str(form.get("confirm_password", ""))
+
+        if len(new_password) < 8:
+            return RedirectResponse("/auth/password?msg=Password+too+short", status_code=303)
+        if new_password != confirm_password:
+            return RedirectResponse("/auth/password?msg=Passwords+do+not+match", status_code=303)
+
+        changed = await _invoke_callback(
+            change_password_fn,
+            user.email,
+            current_password,
+            new_password,
+            request=request,
+        )
+        if not changed:
+            return RedirectResponse("/auth/password?msg=Current+password+invalid", status_code=303)
+
+        return RedirectResponse("/auth/password?msg=Password+updated", status_code=303)
 
     @router.post("/auth/logout")
     async def logout_post():
