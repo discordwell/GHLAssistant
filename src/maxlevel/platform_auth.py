@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import datetime as dt
@@ -125,6 +126,16 @@ def verify_password(password: str, stored_hash: str) -> bool:
 
     actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
     return hmac.compare_digest(actual, expected)
+
+
+async def hash_password_async(password: str, iterations: int = 200_000) -> str:
+    """Async wrapper for PBKDF2 hashing to avoid blocking the event loop."""
+    return await asyncio.to_thread(hash_password, password, iterations)
+
+
+async def verify_password_async(password: str, stored_hash: str) -> bool:
+    """Async wrapper for PBKDF2 verification to avoid blocking the event loop."""
+    return await asyncio.to_thread(verify_password, password, stored_hash)
 
 
 def issue_invite_token() -> str:
