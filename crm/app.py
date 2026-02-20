@@ -78,6 +78,7 @@ app.include_router(
         settings,
         service_name="crm",
         home_path="/locations/",
+        allow_bootstrap_fallback=False,
         authenticate_fn=auth_svc.authenticate_user,
         list_invites_fn=auth_svc.list_invites,
         create_invite_fn=auth_svc.create_invite,

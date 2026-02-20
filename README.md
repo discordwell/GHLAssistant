@@ -99,6 +99,8 @@ Persistent accounts/invites are now DB-backed:
 - Admin invite UI: `/auth/invites`
 - Invite accept flow: `/auth/accept?token=...`
 - User lifecycle management (role/status): `/auth/users`
+- CRM/Workflows disable direct bootstrap fallback once DB auth is wired (bootstrap is seed-only there).
+- User lifecycle updates enforce role hierarchy (non-owners cannot modify owner accounts or self-escalate).
 
 ## Health/Readiness Endpoints
 
