@@ -8,6 +8,8 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from maxlevel.platform_auth import RBACMiddleware, build_auth_router
+
 from .config import settings
 from .worker import dispatch_worker
 
@@ -27,6 +29,19 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=settings.app_title, lifespan=lifespan)
 
+app.add_middleware(
+    RBACMiddleware,
+    settings_obj=settings,
+    service_name="workflows",
+    exempt_prefixes=(
+        "/health",
+        "/ready",
+        "/static/",
+        "/auth/login",
+        "/auth/logout",
+        "/webhooks/",
+    ),
+)
 app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="wf_static")
 
 templates = Jinja2Templates(directory=str(settings.templates_dir))
@@ -52,3 +67,4 @@ app.include_router(api.router)
 app.include_router(chat.router)
 app.include_router(webhooks.router)
 app.include_router(health.router)
+app.include_router(build_auth_router(settings, home_path="/"))

@@ -76,6 +76,7 @@ Services:
 - `WF_CHAT_API_KEY`: API-key auth for `/chat/send`
 - `WF_WEBHOOK_ASYNC_DISPATCH=true`: queue webhook triggers instead of running inline
 - `WF_SECURITY_FAIL_CLOSED=true` (or `WF_ENVIRONMENT=production`): reject insecure webhook/chat configs
+- `WF_AUTH_ENABLED=true`: enable session auth + RBAC middleware
 
 ### CRM
 
@@ -84,9 +85,16 @@ Services:
 - `CRM_TENANT_AUTH_REQUIRED=true`: require tenant token on `/loc/{slug}/...` routes
 - `CRM_TENANT_ACCESS_TOKENS=slug:token,...`: per-tenant access tokens
 - `CRM_SECURITY_FAIL_CLOSED=true` (or `CRM_ENVIRONMENT=production`): reject insecure webhook configs
+- `CRM_AUTH_ENABLED=true`: enable session auth + RBAC middleware
 - Form anti-spam:
   - `CRM_FORM_RATE_LIMIT_*`
   - honeypot field via `CRM_FORM_HONEYPOT_FIELD`
+
+### Dashboard
+
+- `DASH_AUTH_ENABLED=true`: enable session auth + RBAC middleware
+
+Auth bootstrap credentials are currently environment-driven (`*_AUTH_BOOTSTRAP_*`) as a skeleton; replace with a real user store/IdP before GA.
 
 ## Health/Readiness Endpoints
 

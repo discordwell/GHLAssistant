@@ -12,6 +12,14 @@ class WorkflowSettings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///workflows.db"
     echo_sql: bool = False
     app_title: str = "MaxLevel Workflows"
+    auth_enabled: bool = False
+    auth_secret: str = ""
+    auth_cookie_name: str = "ml_wf_session"
+    auth_cookie_secure: bool = False
+    auth_session_ttl_seconds: int = 86400
+    auth_bootstrap_email: str = "admin@example.com"
+    auth_bootstrap_password: str = ""
+    auth_bootstrap_role: str = "owner"
     anthropic_api_key: str = ""
     security_fail_closed: bool = False
     webhook_api_key: str = ""
