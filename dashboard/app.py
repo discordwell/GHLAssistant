@@ -33,6 +33,7 @@ app.add_middleware(
         "/auth/login",
         "/auth/logout",
         "/auth/invites",
+        "/auth/users",
         "/auth/accept",
     ),
 )

@@ -98,6 +98,7 @@ Auth bootstrap credentials are currently environment-driven (`*_AUTH_BOOTSTRAP_*
 Persistent accounts/invites are now DB-backed:
 - Admin invite UI: `/auth/invites`
 - Invite accept flow: `/auth/accept?token=...`
+- User lifecycle management (role/status): `/auth/users`
 
 ## Health/Readiness Endpoints
 

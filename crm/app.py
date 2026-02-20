@@ -39,6 +39,7 @@ app.add_middleware(
         "/auth/login",
         "/auth/logout",
         "/auth/invites",
+        "/auth/users",
         "/auth/accept",
         "/webhooks/",
         "/f/",
@@ -81,5 +82,7 @@ app.include_router(
         list_invites_fn=auth_svc.list_invites,
         create_invite_fn=auth_svc.create_invite,
         accept_invite_fn=auth_svc.accept_invite,
+        list_accounts_fn=auth_svc.list_accounts,
+        update_account_fn=auth_svc.update_account,
     )
 )
