@@ -17,6 +17,7 @@ class WorkflowSettings(BaseSettings):
     auth_cookie_name: str = "ml_wf_session"
     auth_cookie_secure: bool = False
     auth_session_ttl_seconds: int = 86400
+    auth_invite_ttl_hours: int = 72
     auth_bootstrap_email: str = "admin@example.com"
     auth_bootstrap_password: str = ""
     auth_bootstrap_role: str = "owner"

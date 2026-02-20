@@ -5,6 +5,7 @@ from .workflow import Workflow, WorkflowStep
 from .execution import WorkflowExecution, WorkflowStepExecution
 from .dispatch import WorkflowDispatch
 from .log import WorkflowLog
+from .auth import AuthAccount, AuthInvite
 
 __all__ = [
     "Base",
@@ -14,4 +15,6 @@ __all__ = [
     "WorkflowStepExecution",
     "WorkflowDispatch",
     "WorkflowLog",
+    "AuthAccount",
+    "AuthInvite",
 ]

@@ -32,6 +32,8 @@ app.add_middleware(
         "/static/",
         "/auth/login",
         "/auth/logout",
+        "/auth/invites",
+        "/auth/accept",
     ),
 )
 app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="dash_static")
@@ -44,4 +46,10 @@ from .routers import home, health  # noqa: E402
 
 app.include_router(home.router)
 app.include_router(health.router)
-app.include_router(build_auth_router(settings, home_path="/"))
+app.include_router(
+    build_auth_router(
+        settings,
+        service_name="dashboard",
+        home_path="/",
+    )
+)

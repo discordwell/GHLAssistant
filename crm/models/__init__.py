@@ -19,6 +19,7 @@ from .campaign import Campaign, CampaignStep, CampaignEnrollment
 from .funnel import Funnel, FunnelPage
 from .ghl_raw import GHLRawEntity
 from .asset import Asset, AssetRef, AssetJob, AssetRemoteMap
+from .auth import AuthAccount, AuthInvite
 
 __all__ = [
     "Base",
@@ -60,4 +61,6 @@ __all__ = [
     "AssetRef",
     "AssetJob",
     "AssetRemoteMap",
+    "AuthAccount",
+    "AuthInvite",
 ]

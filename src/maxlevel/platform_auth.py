@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import base64
+import binascii
+import datetime as dt
 import hashlib
 import hmac
 import html
+import inspect
 import json
+import secrets
 import time
 from dataclasses import dataclass
 from typing import Iterable
@@ -33,6 +37,45 @@ SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 class AuthUser:
     email: str
     role: str
+
+
+def hash_password(password: str, iterations: int = 200_000) -> str:
+    """Hash a password using PBKDF2-SHA256."""
+    if not password:
+        raise ValueError("Password is required")
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+    return (
+        f"pbkdf2_sha256${iterations}$"
+        f"{binascii.hexlify(salt).decode('ascii')}$"
+        f"{binascii.hexlify(digest).decode('ascii')}"
+    )
+
+
+def verify_password(password: str, stored_hash: str) -> bool:
+    """Verify a PBKDF2-SHA256 password hash."""
+    if not password or not stored_hash:
+        return False
+    try:
+        scheme, iterations_raw, salt_hex, digest_hex = stored_hash.split("$", 3)
+        if scheme != "pbkdf2_sha256":
+            return False
+        iterations = int(iterations_raw)
+        salt = binascii.unhexlify(salt_hex.encode("ascii"))
+        expected = binascii.unhexlify(digest_hex.encode("ascii"))
+    except Exception:
+        return False
+
+    actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+    return hmac.compare_digest(actual, expected)
+
+
+def issue_invite_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def hash_invite_token(token: str) -> str:
+    return hashlib.sha256((token or "").encode("utf-8")).hexdigest()
 
 
 def _normalize_role(role: str) -> str:
@@ -262,9 +305,59 @@ def require_permission(settings_obj, permission: str):
     return _dep
 
 
-def build_auth_router(settings_obj, home_path: str = "/") -> APIRouter:
+def build_auth_router(
+    settings_obj,
+    *,
+    service_name: str,
+    home_path: str = "/",
+    authenticate_fn=None,
+    list_invites_fn=None,
+    create_invite_fn=None,
+    accept_invite_fn=None,
+) -> APIRouter:
     """Construct login/logout routes for a service app."""
     router = APIRouter(tags=["auth"])
+
+    async def _maybe_await(value):
+        return await value if inspect.isawaitable(value) else value
+
+    def _supports_request_arg(callback) -> bool:
+        if not callback:
+            return False
+        try:
+            sig = inspect.signature(callback)
+        except (TypeError, ValueError):
+            return False
+        if "request" in sig.parameters:
+            return True
+        return any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+        )
+
+    async def _invoke_callback(callback, *args, request: Request | None = None):
+        if not callback:
+            return None
+        kwargs = {"request": request} if request and _supports_request_arg(callback) else {}
+        return await _maybe_await(callback(*args, **kwargs))
+
+    async def _authenticate(request: Request, email: str, password: str) -> AuthUser | None:
+        if authenticate_fn:
+            user = await _invoke_callback(authenticate_fn, email, password, request=request)
+            if user:
+                return user
+        return authenticate_bootstrap_user(settings_obj, email=email, password=password)
+
+    def _can_manage_users(user: AuthUser | None) -> bool:
+        if not user:
+            return False
+        return has_permission(user.role, f"{service_name}.write")
+
+    def _fmt_dt(value) -> str:
+        if isinstance(value, dt.datetime):
+            return value.strftime("%Y-%m-%d %H:%M UTC")
+        if isinstance(value, str):
+            return value
+        return "-"
 
     def _render_login(next_path: str, error: str | None = None) -> HTMLResponse:
         error_html = ""
@@ -329,7 +422,7 @@ def build_auth_router(settings_obj, home_path: str = "/") -> APIRouter:
         if not next_path.startswith("/"):
             next_path = home_path
 
-        user = authenticate_bootstrap_user(settings_obj, email=email, password=password)
+        user = await _authenticate(request=request, email=email, password=password)
         if not user:
             return _render_login(next_path, error="Invalid credentials")
 
@@ -338,6 +431,175 @@ def build_auth_router(settings_obj, home_path: str = "/") -> APIRouter:
         response.set_cookie(
             key=_cookie_name(settings_obj),
             value=token,
+            max_age=_ttl_seconds(settings_obj),
+            httponly=True,
+            secure=_cookie_secure(settings_obj),
+            samesite="lax",
+            path="/",
+        )
+        return response
+
+    @router.get("/auth/invites")
+    async def invites_page(request: Request, token: str = "", msg: str = ""):
+        if not _auth_enabled(settings_obj):
+            return RedirectResponse(home_path, status_code=303)
+        if not create_invite_fn or not list_invites_fn:
+            return HTMLResponse("Invite flow is not configured", status_code=404)
+
+        user = current_user_from_request(request, settings_obj)
+        if not _can_manage_users(user):
+            return RedirectResponse("/auth/login", status_code=303)
+
+        invites = await _invoke_callback(list_invites_fn, request=request)
+        invite_rows = []
+        for invite in invites or []:
+            invite_rows.append(
+                "<tr>"
+                f"<td style='padding:.4rem;border-top:1px solid #1f2937;'>{html.escape(str(invite.get('email', '')))}</td>"
+                f"<td style='padding:.4rem;border-top:1px solid #1f2937;'>{html.escape(str(invite.get('role', '')))}</td>"
+                f"<td style='padding:.4rem;border-top:1px solid #1f2937;'>{html.escape(str(invite.get('status', '')))}</td>"
+                f"<td style='padding:.4rem;border-top:1px solid #1f2937;'>{html.escape(_fmt_dt(invite.get('expires_at')))}</td>"
+                "</tr>"
+            )
+        invite_table = "".join(invite_rows) or (
+            "<tr><td colspan='4' style='padding:.6rem;color:#9ca3af;'>No invites yet</td></tr>"
+        )
+
+        token_block = ""
+        if token:
+            base = str(request.base_url).rstrip("/")
+            link = f"{base}/auth/accept?token={quote(token, safe='')}"
+            token_block = (
+                "<div style='background:#0f172a;border:1px solid #1f2937;border-radius:8px;padding:.75rem;margin:1rem 0;'>"
+                "<div style='font-weight:600;margin-bottom:.35rem;'>Invite Link</div>"
+                f"<code style='word-break:break-all;'>{html.escape(link)}</code>"
+                "</div>"
+            )
+
+        message_block = ""
+        if msg:
+            message_block = f"<p style='color:#22c55e;margin:.5rem 0 0 0;'>{html.escape(msg)}</p>"
+
+        page = f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>User Invites</title>
+<style>
+body {{ font-family: system-ui, sans-serif; background:#0b1020; color:#e5e7eb; margin:0; }}
+.wrap {{ max-width:860px; margin:1.5rem auto; padding:0 1rem; }}
+.card {{ background:#111827; border:1px solid #1f2937; border-radius:12px; padding:1rem; margin-bottom:1rem; }}
+input, select {{ width:100%; padding:.6rem .7rem; border-radius:8px; border:1px solid #374151; background:#0f172a; color:#f3f4f6; }}
+button {{ padding:.6rem .9rem; border:0; border-radius:8px; background:#2563eb; color:white; font-weight:600; cursor:pointer; }}
+table {{ width:100%; border-collapse:collapse; font-size:.92rem; }}
+a {{ color:#60a5fa; }}
+</style></head><body>
+<div class="wrap">
+  <div class="card">
+    <h1 style="margin:0 0 .25rem 0;">User Invites</h1>
+    <p style="margin:0;color:#9ca3af;">Create invite links for new users.</p>
+    {message_block}
+    {token_block}
+    <form method="post" action="/auth/invites" style="margin-top:.8rem;display:grid;grid-template-columns:2fr 1fr auto;gap:.6rem;align-items:end;">
+      <div><label>Email</label><input type="email" name="email" required></div>
+      <div><label>Role</label>
+        <select name="role">
+          <option value="viewer">viewer</option>
+          <option value="agent">agent</option>
+          <option value="manager">manager</option>
+          <option value="admin">admin</option>
+          <option value="owner">owner</option>
+        </select>
+      </div>
+      <div><button type="submit">Create Invite</button></div>
+    </form>
+  </div>
+  <div class="card">
+    <h2 style="margin:0 0 .75rem 0;font-size:1.05rem;">Recent Invites</h2>
+    <table>
+      <thead><tr><th align="left">Email</th><th align="left">Role</th><th align="left">Status</th><th align="left">Expires</th></tr></thead>
+      <tbody>{invite_table}</tbody>
+    </table>
+  </div>
+  <p><a href="{html.escape(home_path)}">Back to app</a></p>
+</div></body></html>"""
+        return HTMLResponse(page)
+
+    @router.post("/auth/invites")
+    async def create_invite(request: Request):
+        if not _auth_enabled(settings_obj):
+            return RedirectResponse(home_path, status_code=303)
+        if not create_invite_fn:
+            return HTMLResponse("Invite flow is not configured", status_code=404)
+
+        user = current_user_from_request(request, settings_obj)
+        if not _can_manage_users(user):
+            return RedirectResponse("/auth/login", status_code=303)
+
+        form = await request.form()
+        email = str(form.get("email", "")).strip().lower()
+        role = _normalize_role(str(form.get("role", "viewer")))
+        if not email:
+            return RedirectResponse("/auth/invites?msg=Email+required", status_code=303)
+
+        token = await _invoke_callback(
+            create_invite_fn,
+            email,
+            role,
+            user.email,
+            request=request,
+        )
+        return RedirectResponse(
+            f"/auth/invites?msg=Invite+created&token={quote(token or '', safe='')}",
+            status_code=303,
+        )
+
+    @router.get("/auth/accept")
+    async def accept_page(token: str = ""):
+        if not _auth_enabled(settings_obj):
+            return RedirectResponse(home_path, status_code=303)
+        if not accept_invite_fn:
+            return HTMLResponse("Invite acceptance is not configured", status_code=404)
+
+        token_safe = html.escape(token)
+        page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Accept Invite</title>
+<style>
+body {{ font-family: system-ui, sans-serif; background:#0b1020; color:#e5e7eb; margin:0; }}
+.wrap {{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:1rem; }}
+.card {{ width:100%; max-width:420px; background:#111827; border:1px solid #1f2937; border-radius:12px; padding:1.25rem; }}
+input {{ width:100%; padding:.6rem .7rem; border-radius:8px; border:1px solid #374151; background:#0f172a; color:#f3f4f6; }}
+button {{ margin-top:1rem; width:100%; padding:.65rem .8rem; border:0; border-radius:8px; background:#2563eb; color:#fff; font-weight:600; cursor:pointer; }}
+</style></head><body><div class="wrap"><form method="post" class="card">
+<h1 style="margin:0 0 .35rem 0;">Accept Invite</h1>
+<p style="margin:0 0 .9rem 0;color:#9ca3af;">Set a password to activate your account.</p>
+<input type="hidden" name="token" value="{token_safe}">
+<label for="password">Password</label>
+<input id="password" name="password" type="password" required minlength="8" autocomplete="new-password">
+<button type="submit">Activate Account</button>
+</form></div></body></html>"""
+        return HTMLResponse(page)
+
+    @router.post("/auth/accept")
+    async def accept_submit(request: Request):
+        if not _auth_enabled(settings_obj):
+            return RedirectResponse(home_path, status_code=303)
+        if not accept_invite_fn:
+            return HTMLResponse("Invite acceptance is not configured", status_code=404)
+
+        form = await request.form()
+        token = str(form.get("token", "")).strip()
+        password = str(form.get("password", ""))
+        if not token or len(password) < 8:
+            return HTMLResponse("Invalid invite or password too short", status_code=400)
+
+        user = await _invoke_callback(accept_invite_fn, token, password, request=request)
+        if not user:
+            return HTMLResponse("Invite is invalid, expired, or already used", status_code=400)
+
+        session_token = issue_session_token(settings_obj, user)
+        response = RedirectResponse(home_path, status_code=303)
+        response.set_cookie(
+            key=_cookie_name(settings_obj),
+            value=session_token,
             max_age=_ttl_seconds(settings_obj),
             httponly=True,
             secure=_cookie_secure(settings_obj),
@@ -359,4 +621,3 @@ def build_auth_router(settings_obj, home_path: str = "/") -> APIRouter:
         return response
 
     return router
-

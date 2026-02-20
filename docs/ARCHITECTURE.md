@@ -26,6 +26,7 @@ MaxLevel is split into service-focused apps plus a shared CLI SDK:
 ## Security Controls
 
 - Session auth + RBAC middleware is wired for CRM, Workflows, and Dashboard (role tiers: viewer, agent, manager, admin, owner).
+- CRM and Workflows now persist auth users + invites in database tables (`auth_account`, `auth_invite`).
 - Workflow webhooks:
   - HMAC signing (`WF_WEBHOOK_SIGNING_SECRET`)
   - API key fallback (`WF_WEBHOOK_API_KEY`)
@@ -41,7 +42,7 @@ MaxLevel is split into service-focused apps plus a shared CLI SDK:
   - per-IP/form rate limiting
   - honeypot field and optional min-submit timing
 
-Current auth implementation is intentionally a skeleton (bootstrap env credentials + signed cookie sessions) and is designed to be replaced by persistent users/SSO.
+Current auth supports DB-backed users/invites with bootstrap seeding for first admin. SSO/user lifecycle expansion can be layered on top.
 
 ## Availability
 
