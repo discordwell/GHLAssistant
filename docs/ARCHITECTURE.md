@@ -33,7 +33,10 @@ MaxLevel is split into service-focused apps plus a shared CLI SDK:
 - User lifecycle updates enforce role hierarchy to prevent non-owner escalation and owner-account takeover by lower roles.
 - Session auth is resolved against DB user state/role per request in CRM/Workflows so disable/demotion applies immediately.
 - Auth form endpoints are brute-force throttled via `*_AUTH_RATE_LIMIT_*` controls.
+- Auth form POSTs (including login + invite accept) require CSRF token validation.
 - Auth login `next` redirects are sanitized to prevent open-redirect abuse.
+- Auth events are appended to immutable-style `auth_event` audit logs (no update/delete paths exposed).
+- Dashboard auth is resolved from persistent CRM auth accounts with no direct bootstrap fallback.
 - Workflow webhooks:
   - HMAC signing (`WF_WEBHOOK_SIGNING_SECRET`)
   - API key fallback (`WF_WEBHOOK_API_KEY`)

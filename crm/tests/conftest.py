@@ -9,6 +9,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from crm.config import settings
 from crm.models.base import Base
 from crm.models.location import Location
 from crm.database import get_db
@@ -56,6 +57,20 @@ async def client(engine):
 
     session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
+    class CSRFAwareAsyncClient(AsyncClient):
+        async def post(self, url, *args, **kwargs):
+            url_str = str(url)
+            if url_str in {"/auth/login", "/auth/accept"}:
+                data = kwargs.get("data")
+                if isinstance(data, dict) and "csrf_token" not in data:
+                    token = "test-csrf-token"
+                    kwargs["data"] = {**data, "csrf_token": token}
+                    cookies = kwargs.get("cookies")
+                    cookies_dict = dict(cookies or {})
+                    cookies_dict.setdefault(f"{settings.auth_cookie_name}_csrf", token)
+                    kwargs["cookies"] = cookies_dict
+            return await super().post(url, *args, **kwargs)
+
     async def override_get_db():
         async with session_factory() as session:
             yield session
@@ -63,7 +78,7 @@ async def client(engine):
     app.dependency_overrides[get_db] = override_get_db
 
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
+    async with CSRFAwareAsyncClient(transport=transport, base_url="http://test") as c:
         yield c
 
     app.dependency_overrides.clear()

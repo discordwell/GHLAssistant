@@ -6,8 +6,10 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 
 from crm.config import settings
+from crm.models.auth import AuthEvent
 
 
 def _csrf(cookies) -> str:
@@ -574,3 +576,141 @@ async def test_login_page_rejects_scheme_relative_next_when_already_authenticate
     )
     assert redirect.status_code == 303
     assert redirect.headers["location"] == "/locations/"
+
+
+@pytest.mark.asyncio
+async def test_csrf_required_for_login_and_invite_accept(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(settings, "auth_enabled", True)
+    monkeypatch.setattr(settings, "auth_secret", "test-secret")
+    monkeypatch.setattr(settings, "auth_bootstrap_email", "owner@example.com")
+    monkeypatch.setattr(settings, "auth_bootstrap_password", "ownerpass123")
+    monkeypatch.setattr(settings, "auth_bootstrap_role", "owner")
+
+    login_rejected = await client.request(
+        "POST",
+        "/auth/login",
+        data={"email": "owner@example.com", "password": "ownerpass123", "next": "/locations/"},
+        follow_redirects=False,
+    )
+    assert login_rejected.status_code == 400
+    assert "Invalid request" in login_rejected.text
+
+    owner_login = await client.post(
+        "/auth/login",
+        data={"email": "owner@example.com", "password": "ownerpass123", "next": "/locations/"},
+        follow_redirects=False,
+    )
+    assert owner_login.status_code == 303
+
+    invite_resp = await client.post(
+        "/auth/invites",
+        data={
+            "email": "accept-csrf@example.com",
+            "role": "manager",
+            "csrf_token": _csrf(owner_login.cookies),
+        },
+        cookies=owner_login.cookies,
+        follow_redirects=False,
+    )
+    token = parse_qs(urlparse(invite_resp.headers["location"]).query).get("token", [""])[0]
+    assert token
+
+    accept_rejected = await client.request(
+        "POST",
+        "/auth/accept",
+        data={"token": token, "password": "acceptpass123"},
+        follow_redirects=False,
+    )
+    assert accept_rejected.status_code == 400
+    assert "Invalid request" in accept_rejected.text
+
+
+@pytest.mark.asyncio
+async def test_auth_audit_events_cover_core_flows(
+    client: AsyncClient,
+    db,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(settings, "auth_enabled", True)
+    monkeypatch.setattr(settings, "auth_secret", "test-secret")
+    monkeypatch.setattr(settings, "auth_bootstrap_email", "owner@example.com")
+    monkeypatch.setattr(settings, "auth_bootstrap_password", "ownerpass123")
+    monkeypatch.setattr(settings, "auth_bootstrap_role", "owner")
+
+    failed_login = await client.post(
+        "/auth/login",
+        data={"email": "owner@example.com", "password": "wrong-pass", "next": "/locations/"},
+        follow_redirects=False,
+    )
+    assert failed_login.status_code == 200
+    assert "Invalid credentials" in failed_login.text
+
+    owner_login = await client.post(
+        "/auth/login",
+        data={"email": "owner@example.com", "password": "ownerpass123", "next": "/locations/"},
+        follow_redirects=False,
+    )
+    assert owner_login.status_code == 303
+
+    invite_resp = await client.post(
+        "/auth/invites",
+        data={
+            "email": "audit-user@example.com",
+            "role": "manager",
+            "csrf_token": _csrf(owner_login.cookies),
+        },
+        cookies=owner_login.cookies,
+        follow_redirects=False,
+    )
+    token = parse_qs(urlparse(invite_resp.headers["location"]).query).get("token", [""])[0]
+    assert token
+
+    accept_resp = await client.post(
+        "/auth/accept",
+        data={"token": token, "password": "auditpass123"},
+        follow_redirects=False,
+    )
+    assert accept_resp.status_code == 303
+
+    update_resp = await client.post(
+        "/auth/users",
+        data={
+            "email": "audit-user@example.com",
+            "role": "viewer",
+            "is_active": "true",
+            "csrf_token": _csrf(owner_login.cookies),
+        },
+        cookies=owner_login.cookies,
+        follow_redirects=False,
+    )
+    assert update_resp.status_code == 303
+
+    pw_resp = await client.post(
+        "/auth/password",
+        data={
+            "current_password": "ownerpass123",
+            "new_password": "ownerpass456",
+            "confirm_password": "ownerpass456",
+            "csrf_token": _csrf(owner_login.cookies),
+        },
+        cookies=owner_login.cookies,
+        follow_redirects=False,
+    )
+    assert pw_resp.status_code == 303
+    assert pw_resp.headers["location"].startswith("/auth/password?msg=Password+updated")
+
+    rows = (
+        await db.execute(
+            select(AuthEvent.action, AuthEvent.outcome).order_by(AuthEvent.created_at.asc())
+        )
+    ).all()
+    action_outcomes = {(row[0], row[1]) for row in rows}
+    assert ("login", "failure") in action_outcomes
+    assert ("login", "success") in action_outcomes
+    assert ("invite_create", "success") in action_outcomes
+    assert ("invite_accept", "success") in action_outcomes
+    assert ("user_update", "success") in action_outcomes
+    assert ("password_change", "success") in action_outcomes

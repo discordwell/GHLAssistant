@@ -450,6 +450,7 @@ def build_auth_router(
     list_accounts_fn=None,
     update_account_fn=None,
     change_password_fn=None,
+    audit_log_fn=None,
 ) -> APIRouter:
     """Construct login/logout routes for a service app."""
     router = APIRouter(tags=["auth"])
@@ -476,6 +477,31 @@ def build_auth_router(
             return None
         kwargs = {"request": request} if request and _supports_request_arg(callback) else {}
         return await _maybe_await(callback(*args, **kwargs))
+
+    async def _audit(
+        action: str,
+        outcome: str,
+        *,
+        actor_email: str | None = None,
+        target_email: str | None = None,
+        details=None,
+        request: Request | None = None,
+    ) -> None:
+        if not audit_log_fn:
+            return
+        try:
+            await _invoke_callback(
+                audit_log_fn,
+                action,
+                outcome,
+                actor_email,
+                target_email,
+                details,
+                request=request,
+            )
+        except Exception:
+            # Never block auth flow on audit write errors.
+            return
 
     async def _authenticate(request: Request, email: str, password: str) -> AuthUser | None:
         if authenticate_fn:
@@ -600,6 +626,25 @@ def build_auth_router(
         email = str(form.get("email", "")).strip()
         password = str(form.get("password", ""))
         next_path = _sanitize_next_path(str(form.get("next", home_path)), home_path)
+        csrf_token = str(form.get("csrf_token", ""))
+        email_norm = (email or "").strip().lower()
+        if not _valid_csrf(request, settings_obj, csrf_token):
+            err_csrf = _ensure_csrf_token(request, settings_obj)
+            response = _render_login(
+                next_path,
+                csrf_token=err_csrf,
+                error="Invalid request",
+                status_code=400,
+            )
+            _set_csrf_cookie(response, settings_obj, err_csrf)
+            await _audit(
+                "login",
+                "failure",
+                target_email=email_norm or None,
+                details={"reason": "invalid_csrf"},
+                request=request,
+            )
+            return response
 
         login_key = _login_key(request, email)
         now = time.time()
@@ -612,6 +657,13 @@ def build_auth_router(
                 status_code=429,
             )
             _set_csrf_cookie(response, settings_obj, err_csrf)
+            await _audit(
+                "login",
+                "rate_limited",
+                target_email=email_norm or None,
+                details={"reason": "too_many_attempts"},
+                request=request,
+            )
             return response
 
         user = await _authenticate(request=request, email=email, password=password)
@@ -632,6 +684,13 @@ def build_auth_router(
                     status_code=429,
                 )
                 _set_csrf_cookie(response, settings_obj, err_csrf)
+                await _audit(
+                    "login",
+                    "rate_limited",
+                    target_email=email_norm or None,
+                    details={"reason": "too_many_attempts"},
+                    request=request,
+                )
                 return response
             err_csrf = _ensure_csrf_token(request, settings_obj)
             response = _render_login(
@@ -640,6 +699,13 @@ def build_auth_router(
                 error="Invalid credentials",
             )
             _set_csrf_cookie(response, settings_obj, err_csrf)
+            await _audit(
+                "login",
+                "failure",
+                target_email=email_norm or None,
+                details={"reason": "invalid_credentials"},
+                request=request,
+            )
             return response
 
         limiter.clear(login_key)
@@ -656,6 +722,14 @@ def build_auth_router(
             path="/",
         )
         _set_csrf_cookie(response, settings_obj, _ensure_csrf_token(request, settings_obj))
+        await _audit(
+            "login",
+            "success",
+            actor_email=user.email,
+            target_email=user.email,
+            details={"next": next_path},
+            request=request,
+        )
         return response
 
     @router.get("/auth/invites")
@@ -763,11 +837,25 @@ a {{ color:#60a5fa; }}
         form = await request.form()
         csrf_token = str(form.get("csrf_token", ""))
         if not _valid_csrf(request, settings_obj, csrf_token):
+            await _audit(
+                "invite_create",
+                "failure",
+                actor_email=user.email,
+                details={"reason": "invalid_csrf"},
+                request=request,
+            )
             return RedirectResponse("/auth/invites?msg=Invalid+request", status_code=303)
 
         email = str(form.get("email", "")).strip().lower()
         role = _normalize_role(str(form.get("role", "viewer")))
         if not email:
+            await _audit(
+                "invite_create",
+                "failure",
+                actor_email=user.email,
+                details={"reason": "email_required"},
+                request=request,
+            )
             return RedirectResponse("/auth/invites?msg=Email+required", status_code=303)
 
         token = await _invoke_callback(
@@ -777,18 +865,27 @@ a {{ color:#60a5fa; }}
             user.email,
             request=request,
         )
+        await _audit(
+            "invite_create",
+            "success",
+            actor_email=user.email,
+            target_email=email,
+            details={"role": role},
+            request=request,
+        )
         return RedirectResponse(
             f"/auth/invites?msg=Invite+created&token={quote(token or '', safe='')}",
             status_code=303,
         )
 
     @router.get("/auth/accept")
-    async def accept_page(token: str = ""):
+    async def accept_page(request: Request, token: str = ""):
         if not _auth_enabled(settings_obj):
             return RedirectResponse(home_path, status_code=303)
         if not accept_invite_fn:
             return HTMLResponse("Invite acceptance is not configured", status_code=404)
 
+        csrf_token = _ensure_csrf_token(request, settings_obj)
         token_safe = html.escape(token)
         page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Accept Invite</title>
@@ -802,11 +899,14 @@ button {{ margin-top:1rem; width:100%; padding:.65rem .8rem; border:0; border-ra
 <h1 style="margin:0 0 .35rem 0;">Accept Invite</h1>
 <p style="margin:0 0 .9rem 0;color:#9ca3af;">Set a password to activate your account.</p>
 <input type="hidden" name="token" value="{token_safe}">
+<input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">
 <label for="password">Password</label>
 <input id="password" name="password" type="password" required minlength="8" autocomplete="new-password">
 <button type="submit">Activate Account</button>
 </form></div></body></html>"""
-        return HTMLResponse(page)
+        response = HTMLResponse(page)
+        _set_csrf_cookie(response, settings_obj, csrf_token)
+        return response
 
     @router.post("/auth/accept")
     async def accept_submit(request: Request):
@@ -818,11 +918,32 @@ button {{ margin-top:1rem; width:100%; padding:.65rem .8rem; border:0; border-ra
         form = await request.form()
         token = str(form.get("token", "")).strip()
         password = str(form.get("password", ""))
+        csrf_token = str(form.get("csrf_token", ""))
+        if not _valid_csrf(request, settings_obj, csrf_token):
+            await _audit(
+                "invite_accept",
+                "failure",
+                details={"reason": "invalid_csrf"},
+                request=request,
+            )
+            return HTMLResponse("Invalid request", status_code=400)
         if not token or len(password) < 8:
+            await _audit(
+                "invite_accept",
+                "failure",
+                details={"reason": "invalid_payload"},
+                request=request,
+            )
             return HTMLResponse("Invalid invite or password too short", status_code=400)
 
         user = await _invoke_callback(accept_invite_fn, token, password, request=request)
         if not user:
+            await _audit(
+                "invite_accept",
+                "failure",
+                details={"reason": "invalid_or_expired_invite"},
+                request=request,
+            )
             return HTMLResponse("Invite is invalid, expired, or already used", status_code=400)
 
         session_token = issue_session_token(settings_obj, user)
@@ -837,6 +958,13 @@ button {{ margin-top:1rem; width:100%; padding:.65rem .8rem; border:0; border-ra
             path="/",
         )
         _set_csrf_cookie(response, settings_obj, _ensure_csrf_token(request, settings_obj))
+        await _audit(
+            "invite_accept",
+            "success",
+            actor_email=user.email,
+            target_email=user.email,
+            request=request,
+        )
         return response
 
     @router.get("/auth/users")
@@ -947,6 +1075,13 @@ a {{ color:#60a5fa; }}
         form = await request.form()
         csrf_token = str(form.get("csrf_token", ""))
         if not _valid_csrf(request, settings_obj, csrf_token):
+            await _audit(
+                "user_update",
+                "failure",
+                actor_email=user.email,
+                details={"reason": "invalid_csrf"},
+                request=request,
+            )
             return RedirectResponse("/auth/users?msg=Invalid+request", status_code=303)
 
         email = str(form.get("email", "")).strip().lower()
@@ -954,6 +1089,13 @@ a {{ color:#60a5fa; }}
         is_active_raw = str(form.get("is_active", "true")).strip().lower()
         is_active = is_active_raw in {"1", "true", "yes", "on", "active"}
         if not email:
+            await _audit(
+                "user_update",
+                "failure",
+                actor_email=user.email,
+                details={"reason": "email_required"},
+                request=request,
+            )
             return RedirectResponse("/auth/users?msg=Email+required", status_code=303)
 
         updated = await _invoke_callback(
@@ -966,6 +1108,14 @@ a {{ color:#60a5fa; }}
             request=request,
         )
         msg = "User+updated" if updated else "Update+rejected"
+        await _audit(
+            "user_update",
+            "success" if updated else "failure",
+            actor_email=user.email,
+            target_email=email,
+            details={"role": role, "is_active": is_active},
+            request=request,
+        )
         return RedirectResponse(f"/auth/users?msg={msg}", status_code=303)
 
     @router.get("/auth/password")
@@ -1033,6 +1183,14 @@ a {{ color:#60a5fa; }}
         form = await request.form()
         csrf_token = str(form.get("csrf_token", ""))
         if not _valid_csrf(request, settings_obj, csrf_token):
+            await _audit(
+                "password_change",
+                "failure",
+                actor_email=user.email,
+                target_email=user.email,
+                details={"reason": "invalid_csrf"},
+                request=request,
+            )
             return RedirectResponse("/auth/password?msg=Invalid+request", status_code=303)
 
         current_password = str(form.get("current_password", ""))
@@ -1041,11 +1199,35 @@ a {{ color:#60a5fa; }}
         pwd_key = _password_key(request, user.email)
         now = time.time()
         if limiter.is_blocked(pwd_key, now):
+            await _audit(
+                "password_change",
+                "rate_limited",
+                actor_email=user.email,
+                target_email=user.email,
+                details={"reason": "too_many_attempts"},
+                request=request,
+            )
             return RedirectResponse("/auth/password?msg=Too+many+attempts", status_code=303)
 
         if len(new_password) < 8:
+            await _audit(
+                "password_change",
+                "failure",
+                actor_email=user.email,
+                target_email=user.email,
+                details={"reason": "password_too_short"},
+                request=request,
+            )
             return RedirectResponse("/auth/password?msg=Password+too+short", status_code=303)
         if new_password != confirm_password:
+            await _audit(
+                "password_change",
+                "failure",
+                actor_email=user.email,
+                target_email=user.email,
+                details={"reason": "password_mismatch"},
+                request=request,
+            )
             return RedirectResponse("/auth/password?msg=Passwords+do+not+match", status_code=303)
 
         changed = await _invoke_callback(
@@ -1063,9 +1245,24 @@ a {{ color:#60a5fa; }}
                 max_attempts=_rate_limit_max_attempts(),
                 block_seconds=_rate_limit_block_seconds(),
             )
+            await _audit(
+                "password_change",
+                "failure",
+                actor_email=user.email,
+                target_email=user.email,
+                details={"reason": "current_password_invalid"},
+                request=request,
+            )
             return RedirectResponse("/auth/password?msg=Current+password+invalid", status_code=303)
 
         limiter.clear(pwd_key)
+        await _audit(
+            "password_change",
+            "success",
+            actor_email=user.email,
+            target_email=user.email,
+            request=request,
+        )
         return RedirectResponse("/auth/password?msg=Password+updated", status_code=303)
 
     @router.post("/auth/logout")

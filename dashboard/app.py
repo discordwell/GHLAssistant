@@ -12,6 +12,7 @@ from maxlevel.platform_auth import RBACMiddleware, build_auth_router
 
 from .config import settings
 from .database import multi_db
+from .services import auth_svc
 
 
 @asynccontextmanager
@@ -26,6 +27,7 @@ app.add_middleware(
     RBACMiddleware,
     settings_obj=settings,
     service_name="dashboard",
+    resolve_user_fn=auth_svc.resolve_user,
     exempt_prefixes=(
         "/health",
         "/ready",
@@ -53,5 +55,9 @@ app.include_router(
         settings,
         service_name="dashboard",
         home_path="/",
+        allow_bootstrap_fallback=False,
+        resolve_user_fn=auth_svc.resolve_user,
+        authenticate_fn=auth_svc.authenticate_user,
+        audit_log_fn=auth_svc.record_auth_event,
     )
 )
