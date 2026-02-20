@@ -310,6 +310,7 @@ def build_auth_router(
     *,
     service_name: str,
     home_path: str = "/",
+    allow_bootstrap_fallback: bool = True,
     authenticate_fn=None,
     list_invites_fn=None,
     create_invite_fn=None,
@@ -347,6 +348,8 @@ def build_auth_router(
             user = await _invoke_callback(authenticate_fn, email, password, request=request)
             if user:
                 return user
+        if not allow_bootstrap_fallback:
+            return None
         return authenticate_bootstrap_user(settings_obj, email=email, password=password)
 
     def _can_manage_users(user: AuthUser | None) -> bool:
@@ -725,6 +728,7 @@ a {{ color:#60a5fa; }}
             role,
             is_active,
             user.email,
+            user.role,
             request=request,
         )
         msg = "User+updated" if updated else "Update+rejected"

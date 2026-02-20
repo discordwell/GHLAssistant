@@ -33,6 +33,10 @@ def _normalize_email(email: str) -> str:
     return (email or "").strip().lower()
 
 
+def _role_rank(role: str) -> int:
+    return ROLE_ORDER.index(_normalize_role(role))
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -215,11 +219,15 @@ async def update_account(
     role: str,
     is_active: bool,
     actor_email: str | None,
+    actor_role: str | None = None,
     request: Request | None = None,
 ) -> bool:
     email_norm = _normalize_email(email)
     actor_norm = _normalize_email(actor_email or "")
+    actor_role_norm = _normalize_role(actor_role or "")
     if not email_norm:
+        return False
+    if not actor_norm or not actor_role:
         return False
 
     async with _db_session(request) as db:
@@ -230,10 +238,22 @@ async def update_account(
             return False
 
         next_role = _normalize_role(role)
-        if actor_norm and actor_norm == email_norm and not is_active:
+        current_role = _normalize_role(account.role)
+
+        if actor_norm == email_norm and not is_active:
+            return False
+        if actor_norm == email_norm and next_role != current_role:
             return False
 
-        current_role = _normalize_role(account.role)
+        actor_rank = _role_rank(actor_role_norm)
+        current_rank = _role_rank(current_role)
+        next_rank = _role_rank(next_role)
+        if actor_norm != email_norm and actor_role_norm != "owner":
+            if actor_rank <= current_rank:
+                return False
+            if next_rank >= actor_rank:
+                return False
+
         removing_owner = current_role == "owner" and (next_role != "owner" or not is_active)
         if removing_owner:
             if await _active_owner_count_excluding(db, email_norm) < 1:

@@ -28,6 +28,8 @@ MaxLevel is split into service-focused apps plus a shared CLI SDK:
 - Session auth + RBAC middleware is wired for CRM, Workflows, and Dashboard (role tiers: viewer, agent, manager, admin, owner).
 - CRM and Workflows now persist auth users + invites in database tables (`auth_account`, `auth_invite`).
 - CRM/Workflows auth now includes user lifecycle UI (`/auth/users`) for role and activation state updates.
+- CRM/Workflows treat bootstrap credentials as seed-only once DB auth callbacks are configured (no direct fallback bypass).
+- User lifecycle updates enforce role hierarchy to prevent non-owner escalation and owner-account takeover by lower roles.
 - Workflow webhooks:
   - HMAC signing (`WF_WEBHOOK_SIGNING_SECRET`)
   - API key fallback (`WF_WEBHOOK_API_KEY`)
