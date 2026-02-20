@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
@@ -22,7 +23,7 @@ from maxlevel.platform_auth import (
 
 from ..config import settings
 from ..database import async_session_factory, get_db
-from ..models.auth import AuthAccount, AuthEvent, AuthInvite
+from ..models.auth import AuthAccount, AuthEvent, AuthInvite, AuthPasswordReset, AuthSession
 
 
 def _normalize_role(role: str) -> str:
@@ -110,27 +111,58 @@ async def _db_session(request: Request | None = None):
     raise RuntimeError("Unsupported DB dependency provider for auth service")
 
 
-async def _ensure_bootstrap_account(request: Request | None = None) -> None:
-    email = _normalize_email(settings.auth_bootstrap_email)
-    password = settings.auth_bootstrap_password
-    if not email or not password:
-        return
+async def has_active_owner(request: Request | None = None) -> bool:
+    async with _db_session(request) as db:
+        count = int(
+            (
+                await db.execute(
+                    select(func.count(AuthAccount.id)).where(
+                        AuthAccount.role == "owner",
+                        AuthAccount.is_active.is_(True),
+                    )
+                )
+            ).scalar_one()
+            or 0
+        )
+        return count > 0
+
+
+async def bootstrap_owner(
+    email: str,
+    password: str,
+    role: str = "owner",
+    force: bool = False,
+    request: Request | None = None,
+) -> bool:
+    email_norm = _normalize_email(email)
+    if not email_norm or len(password or "") < 8:
+        return False
+
+    role_norm = _normalize_role(role)
+    if role_norm != "owner":
+        role_norm = "owner"
 
     async with _db_session(request) as db:
         account = (
-            await db.execute(select(AuthAccount).where(AuthAccount.email == email))
+            await db.execute(select(AuthAccount).where(AuthAccount.email == email_norm))
         ).scalar_one_or_none()
         if account:
-            return
-        db.add(
-            AuthAccount(
-                email=email,
-                password_hash=hash_password(password),
-                role=_normalize_role(settings.auth_bootstrap_role),
-                is_active=True,
+            if not force:
+                return False
+            account.password_hash = hash_password(password)
+            account.role = "owner"
+            account.is_active = True
+        else:
+            db.add(
+                AuthAccount(
+                    email=email_norm,
+                    password_hash=hash_password(password),
+                    role="owner",
+                    is_active=True,
+                )
             )
-        )
         await db.commit()
+        return True
 
 
 async def authenticate_user(
@@ -139,8 +171,6 @@ async def authenticate_user(
     request: Request | None = None,
 ) -> AuthUser | None:
     """Validate credentials against persistent users."""
-    await _ensure_bootstrap_account(request)
-
     email_norm = _normalize_email(email)
     if not email_norm or not password:
         return None
@@ -447,3 +477,274 @@ async def record_auth_event(
             )
         )
         await db.commit()
+
+
+async def list_auth_events(limit: int = 200, request: Request | None = None) -> list[dict]:
+    async with _db_session(request) as db:
+        rows = list(
+            (
+                await db.execute(
+                    select(AuthEvent).order_by(AuthEvent.created_at.desc()).limit(max(1, min(limit, 1000)))
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return [
+        {
+            "created_at": _as_utc(row.created_at),
+            "action": row.action,
+            "outcome": row.outcome,
+            "actor_email": row.actor_email,
+            "target_email": row.target_email,
+            "source_ip": row.source_ip,
+        }
+        for row in rows
+    ]
+
+
+async def create_session(
+    email: str,
+    session_id: str,
+    expires_at: datetime,
+    request: Request | None = None,
+) -> bool:
+    email_norm = _normalize_email(email)
+    sid = (session_id or "").strip()[:64]
+    if not email_norm or not sid:
+        return False
+    async with _db_session(request) as db:
+        db.add(
+            AuthSession(
+                session_id=sid,
+                email=email_norm,
+                source_ip=_client_ip(request),
+                user_agent=(request.headers.get("user-agent", "")[:512] if request else None),
+                expires_at=_as_utc(expires_at) or _utcnow(),
+                last_seen_at=_utcnow(),
+            )
+        )
+        await db.commit()
+        return True
+
+
+async def validate_session(
+    email: str,
+    session_id: str,
+    request: Request | None = None,
+) -> bool:
+    email_norm = _normalize_email(email)
+    sid = (session_id or "").strip()[:64]
+    if not email_norm or not sid:
+        return False
+    now = _utcnow()
+    async with _db_session(request) as db:
+        sess = (
+            await db.execute(
+                select(AuthSession).where(
+                    AuthSession.email == email_norm,
+                    AuthSession.session_id == sid,
+                )
+            )
+        ).scalar_one_or_none()
+        if not sess:
+            return False
+        if sess.revoked_at is not None:
+            return False
+        if (_as_utc(sess.expires_at) or now) <= now:
+            return False
+        sess.last_seen_at = now
+        await db.commit()
+        return True
+
+
+async def list_sessions(email: str, request: Request | None = None, limit: int = 100) -> list[dict]:
+    email_norm = _normalize_email(email)
+    if not email_norm:
+        return []
+    async with _db_session(request) as db:
+        sessions = list(
+            (
+                await db.execute(
+                    select(AuthSession)
+                    .where(
+                        AuthSession.email == email_norm,
+                        AuthSession.revoked_at.is_(None),
+                        AuthSession.expires_at > _utcnow(),
+                    )
+                    .order_by(AuthSession.created_at.desc())
+                    .limit(max(1, min(limit, 500)))
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return [
+        {
+            "session_id": sess.session_id,
+            "source_ip": sess.source_ip,
+            "created_at": _as_utc(sess.created_at),
+            "last_seen_at": _as_utc(sess.last_seen_at),
+            "expires_at": _as_utc(sess.expires_at),
+        }
+        for sess in sessions
+    ]
+
+
+async def revoke_session(
+    email: str,
+    session_id: str,
+    actor_email: str | None = None,
+    request: Request | None = None,
+) -> bool:
+    email_norm = _normalize_email(email)
+    sid = (session_id or "").strip()[:64]
+    actor_norm = _normalize_email(actor_email or "")
+    if not email_norm or not sid:
+        return False
+    if actor_norm and actor_norm != email_norm:
+        return False
+
+    async with _db_session(request) as db:
+        sess = (
+            await db.execute(
+                select(AuthSession).where(
+                    AuthSession.email == email_norm,
+                    AuthSession.session_id == sid,
+                )
+            )
+        ).scalar_one_or_none()
+        if not sess or sess.revoked_at is not None:
+            return False
+        sess.revoked_at = _utcnow()
+        sess.revoked_reason = "manual_logout"
+        await db.commit()
+        return True
+
+
+async def revoke_all_sessions(
+    email: str,
+    actor_email: str | None = None,
+    keep_session_id: str = "",
+    request: Request | None = None,
+) -> int:
+    email_norm = _normalize_email(email)
+    actor_norm = _normalize_email(actor_email or "")
+    keep_sid = (keep_session_id or "").strip()[:64]
+    if not email_norm:
+        return 0
+    if actor_norm and actor_norm != email_norm:
+        return 0
+    async with _db_session(request) as db:
+        sessions = list(
+            (
+                await db.execute(
+                    select(AuthSession).where(
+                        AuthSession.email == email_norm,
+                        AuthSession.revoked_at.is_(None),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        count = 0
+        now = _utcnow()
+        for sess in sessions:
+            if keep_sid and sess.session_id == keep_sid:
+                continue
+            sess.revoked_at = now
+            sess.revoked_reason = "logout_all"
+            count += 1
+        await db.commit()
+        return count
+
+
+def _hash_reset_token(token: str) -> str:
+    return hash_invite_token(token)
+
+
+async def request_password_reset(
+    email: str,
+    request: Request | None = None,
+) -> str | None:
+    email_norm = _normalize_email(email)
+    if not email_norm:
+        return None
+
+    async with _db_session(request) as db:
+        account = (
+            await db.execute(
+                select(AuthAccount).where(
+                    AuthAccount.email == email_norm,
+                    AuthAccount.is_active.is_(True),
+                )
+            )
+        ).scalar_one_or_none()
+        if not account:
+            return None
+
+        now = _utcnow()
+        existing = list(
+            (
+                await db.execute(
+                    select(AuthPasswordReset).where(
+                        AuthPasswordReset.email == email_norm,
+                        AuthPasswordReset.used_at.is_(None),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for row in existing:
+            row.used_at = now
+
+        token = secrets.token_urlsafe(32)
+        db.add(
+            AuthPasswordReset(
+                email=email_norm,
+                token_hash=_hash_reset_token(token),
+                expires_at=now + timedelta(minutes=60),
+                source_ip=_client_ip(request),
+                user_agent=(request.headers.get("user-agent", "")[:512] if request else None),
+            )
+        )
+        await db.commit()
+        return token
+
+
+async def reset_password(
+    token: str,
+    new_password: str,
+    request: Request | None = None,
+) -> AuthUser | None:
+    if len(new_password or "") < 8:
+        return None
+    token_hash = _hash_reset_token(token or "")
+    now = _utcnow()
+    async with _db_session(request) as db:
+        row = (
+            await db.execute(select(AuthPasswordReset).where(AuthPasswordReset.token_hash == token_hash))
+        ).scalar_one_or_none()
+        if (
+            not row
+            or row.used_at is not None
+            or (_as_utc(row.expires_at) or now) <= now
+        ):
+            return None
+        account = (
+            await db.execute(
+                select(AuthAccount).where(
+                    AuthAccount.email == row.email,
+                    AuthAccount.is_active.is_(True),
+                )
+            )
+        ).scalar_one_or_none()
+        if not account:
+            return None
+        account.password_hash = hash_password(new_password)
+        account.last_login_at = now
+        row.used_at = now
+        await db.commit()
+        return AuthUser(email=account.email, role=account.role)

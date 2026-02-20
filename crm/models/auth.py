@@ -43,6 +43,51 @@ class AuthInvite(Base, UUIDMixin, TimestampMixin):
         return f"<AuthInvite {self.email!r} ({self.role})>"
 
 
+class AuthSession(Base, UUIDMixin):
+    """Persisted interactive session for revocation + inventory."""
+
+    __tablename__ = "auth_session"
+
+    session_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    source_ip: Mapped[str | None] = mapped_column(String(64), default=None)
+    user_agent: Mapped[str | None] = mapped_column(String(512), default=None)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        index=True,
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None, index=True)
+    revoked_reason: Mapped[str | None] = mapped_column(String(64), default=None)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        index=True,
+    )
+
+    def __repr__(self) -> str:
+        return f"<AuthSession {self.email!r}>"
+
+
+class AuthPasswordReset(Base, UUIDMixin, TimestampMixin):
+    """One-time password reset token state."""
+
+    __tablename__ = "auth_password_reset"
+
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None, index=True)
+    source_ip: Mapped[str | None] = mapped_column(String(64), default=None)
+    user_agent: Mapped[str | None] = mapped_column(String(512), default=None)
+
+    def __repr__(self) -> str:
+        return f"<AuthPasswordReset {self.email!r}>"
+
+
 class AuthEvent(Base, UUIDMixin):
     """Append-only auth audit event."""
 

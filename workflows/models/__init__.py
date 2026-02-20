@@ -5,7 +5,7 @@ from .workflow import Workflow, WorkflowStep
 from .execution import WorkflowExecution, WorkflowStepExecution
 from .dispatch import WorkflowDispatch
 from .log import WorkflowLog
-from .auth import AuthAccount, AuthInvite, AuthEvent
+from .auth import AuthAccount, AuthInvite, AuthSession, AuthPasswordReset, AuthEvent
 
 __all__ = [
     "Base",
@@ -17,5 +17,7 @@ __all__ = [
     "WorkflowLog",
     "AuthAccount",
     "AuthInvite",
+    "AuthSession",
+    "AuthPasswordReset",
     "AuthEvent",
 ]

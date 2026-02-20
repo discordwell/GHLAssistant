@@ -37,6 +37,10 @@ MaxLevel is split into service-focused apps plus a shared CLI SDK:
 - Auth login `next` redirects are sanitized to prevent open-redirect abuse.
 - Auth events are appended to immutable-style `auth_event` audit logs (no update/delete paths exposed).
 - Dashboard auth is resolved from persistent CRM auth accounts with no direct bootstrap fallback.
+- Runtime auth bootstrap seeding is removed; owner provisioning is explicit via `maxlevel auth bootstrap-owner`.
+- Startup owner guard: in production/fail-closed mode, apps fail to start if no active owner account exists.
+- Password recovery uses one-time reset tokens (`auth_password_reset`) and CSRF-protected `/auth/forgot` + `/auth/reset` flows.
+- Session inventory/revocation uses persisted `auth_session` records with per-request session validation and logout-all support.
 - Workflow webhooks:
   - HMAC signing (`WF_WEBHOOK_SIGNING_SECRET`)
   - API key fallback (`WF_WEBHOOK_API_KEY`)

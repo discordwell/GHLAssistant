@@ -788,6 +788,106 @@ def auth_clear(
         console.print("[green]All tokens cleared[/green]")
 
 
+@auth_app.command("bootstrap-owner")
+def auth_bootstrap_owner(
+    service: str = typer.Option(
+        "crm",
+        "--service",
+        "-s",
+        help="Target service: crm, workflows, or all",
+    ),
+    email: str = typer.Option(
+        "",
+        "--email",
+        "-e",
+        help="Owner email. Defaults to service config value if omitted.",
+    ),
+    password: str = typer.Option(
+        "",
+        "--password",
+        "-p",
+        help="Owner password (min 8 chars). Defaults to service config value if omitted.",
+        hide_input=True,
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help="If account exists, reset it to active owner with the provided password.",
+    ),
+):
+    """One-time owner bootstrap for service auth stores.
+
+    This command replaces implicit runtime bootstrap seeding.
+    """
+
+    target = (service or "").strip().lower()
+    if target not in {"crm", "workflows", "all"}:
+        console.print("[red]Invalid --service. Use crm, workflows, or all.[/red]")
+        raise typer.Exit(1)
+
+    async def _bootstrap_one(service_name: str) -> dict[str, str]:
+        if service_name == "crm":
+            from crm.config import settings as svc_settings
+            from crm.services import auth_svc as svc
+        elif service_name == "workflows":
+            from workflows.config import settings as svc_settings
+            from workflows.services import auth_svc as svc
+        else:
+            return {"service": service_name, "status": "error", "detail": "unsupported service"}
+
+        owner_email = (email or svc_settings.auth_bootstrap_email or "").strip().lower()
+        owner_password = password or svc_settings.auth_bootstrap_password or ""
+        if not owner_email:
+            return {"service": service_name, "status": "error", "detail": "missing owner email"}
+        if len(owner_password) < 8:
+            return {
+                "service": service_name,
+                "status": "error",
+                "detail": "missing/short password (need at least 8 chars)",
+            }
+
+        changed = await svc.bootstrap_owner(
+            owner_email,
+            owner_password,
+            role="owner",
+            force=force,
+        )
+        if changed:
+            return {"service": service_name, "status": "bootstrapped", "detail": owner_email}
+        if await svc.has_active_owner():
+            return {"service": service_name, "status": "exists", "detail": owner_email}
+        return {"service": service_name, "status": "error", "detail": "bootstrap failed"}
+
+    targets = ["crm", "workflows"] if target == "all" else [target]
+    async def _run_all():
+        return await asyncio.gather(*(_bootstrap_one(name) for name in targets))
+
+    try:
+        results = asyncio.run(_run_all())
+    except Exception as exc:
+        console.print(f"[red]Bootstrap failed: {exc}[/red]")
+        raise typer.Exit(1)
+
+    table = Table(title="Owner Bootstrap Results")
+    table.add_column("Service")
+    table.add_column("Status")
+    table.add_column("Detail")
+    has_error = False
+    for row in results:
+        status = row.get("status", "error")
+        if status == "error":
+            has_error = True
+        table.add_row(
+            row.get("service", "-"),
+            status,
+            row.get("detail", ""),
+        )
+    console.print(table)
+    if has_error:
+        raise typer.Exit(1)
+
+
 @auth_app.command("bridge")
 def auth_bridge(
     port: int = typer.Option(3456, "--port", "-p", help="Bridge server port"),

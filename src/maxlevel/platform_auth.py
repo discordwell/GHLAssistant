@@ -38,6 +38,7 @@ SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 class AuthUser:
     email: str
     role: str
+    session_id: str | None = None
 
 
 @dataclass
@@ -257,7 +258,7 @@ def _sanitize_next_path(raw_next: str, home_path: str) -> str:
     return next_path
 
 
-def issue_session_token(settings_obj, user: AuthUser) -> str:
+def issue_session_token(settings_obj, user: AuthUser, session_id: str | None = None) -> str:
     secret = _secret(settings_obj)
     if not secret:
         raise RuntimeError("auth_secret is required when auth is enabled")
@@ -269,6 +270,9 @@ def issue_session_token(settings_obj, user: AuthUser) -> str:
         "iat": now,
         "exp": now + _ttl_seconds(settings_obj),
     }
+    sid = (session_id or user.session_id or "").strip()
+    if sid:
+        payload["sid"] = sid[:64]
     body = _b64url_encode(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
     sig = hmac.new(secret.encode("utf-8"), body.encode("utf-8"), hashlib.sha256).hexdigest()
     return f"{body}.{sig}"
@@ -303,7 +307,9 @@ def decode_session_token(settings_obj, token: str) -> AuthUser | None:
         return None
     if not isinstance(sub, str) or not sub.strip():
         return None
-    return AuthUser(email=sub.strip().lower(), role=_normalize_role(str(role)))
+    sid = payload.get("sid")
+    session_id = sid[:64] if isinstance(sid, str) and sid.strip() else None
+    return AuthUser(email=sub.strip().lower(), role=_normalize_role(str(role)), session_id=session_id)
 
 
 def authenticate_bootstrap_user(settings_obj, email: str, password: str) -> AuthUser | None:
@@ -381,12 +387,14 @@ class RBACMiddleware(BaseHTTPMiddleware):
         service_name: str,
         exempt_prefixes: Iterable[str] = (),
         resolve_user_fn=None,
+        validate_session_fn=None,
     ):
         super().__init__(app)
         self._settings_obj = settings_obj
         self._service_name = service_name
         self._exempt_prefixes = tuple(exempt_prefixes)
         self._resolve_user_fn = resolve_user_fn
+        self._validate_session_fn = validate_session_fn
 
     async def dispatch(self, request: Request, call_next):
         if not _auth_enabled(self._settings_obj):
@@ -399,9 +407,29 @@ class RBACMiddleware(BaseHTTPMiddleware):
             return JSONResponse({"detail": "Authentication is misconfigured"}, status_code=503)
 
         user = current_user_from_request(request, self._settings_obj)
+        token_session_id = user.session_id if user else None
         if user and self._resolve_user_fn:
             resolved = await _invoke_callback(self._resolve_user_fn, user.email, request=request)
-            user = resolved if isinstance(resolved, AuthUser) else None
+            if isinstance(resolved, AuthUser):
+                user = AuthUser(
+                    email=resolved.email,
+                    role=resolved.role,
+                    session_id=token_session_id,
+                )
+            else:
+                user = None
+        if user and self._validate_session_fn:
+            if not token_session_id:
+                user = None
+            else:
+                valid = await _invoke_callback(
+                    self._validate_session_fn,
+                    user.email,
+                    token_session_id,
+                    request=request,
+                )
+                if not bool(valid):
+                    user = None
         if not user:
             if _should_redirect_to_login(request):
                 path_with_query = request.url.path
@@ -450,6 +478,14 @@ def build_auth_router(
     list_accounts_fn=None,
     update_account_fn=None,
     change_password_fn=None,
+    create_session_fn=None,
+    validate_session_fn=None,
+    list_sessions_fn=None,
+    revoke_session_fn=None,
+    revoke_all_sessions_fn=None,
+    request_password_reset_fn=None,
+    reset_password_fn=None,
+    list_audit_events_fn=None,
     audit_log_fn=None,
 ) -> APIRouter:
     """Construct login/logout routes for a service app."""
@@ -539,10 +575,27 @@ def build_auth_router(
         user = current_user_from_request(request, settings_obj)
         if not user:
             return None
+        if validate_session_fn:
+            if not user.session_id:
+                return None
+            valid_session = await _invoke_callback(
+                validate_session_fn,
+                user.email,
+                user.session_id,
+                request=request,
+            )
+            if not bool(valid_session):
+                return None
         if not resolve_user_fn:
             return user
         resolved = await _invoke_callback(resolve_user_fn, user.email, request=request)
-        return resolved if isinstance(resolved, AuthUser) else None
+        if not isinstance(resolved, AuthUser):
+            return None
+        return AuthUser(
+            email=resolved.email,
+            role=resolved.role,
+            session_id=user.session_id,
+        )
 
     def _can_manage_users(user: AuthUser | None) -> bool:
         if not user:
@@ -595,6 +648,7 @@ def build_auth_router(
       <label for="password">Password</label>
       <input id="password" name="password" type="password" required autocomplete="current-password">
       <button type="submit">Sign in</button>
+      <p style="margin:.9rem 0 0 0;text-align:center;"><a href="/auth/forgot" style="color:#60a5fa;">Forgot password?</a></p>
     </form>
   </div>
 </body>
@@ -709,8 +763,20 @@ def build_auth_router(
             return response
 
         limiter.clear(login_key)
+        session_id = secrets.token_urlsafe(32)[:64] if create_session_fn else None
+        expires_at = dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=_ttl_seconds(settings_obj))
+        if create_session_fn and session_id:
+            created = await _invoke_callback(
+                create_session_fn,
+                user.email,
+                session_id,
+                expires_at,
+                request=request,
+            )
+            if not bool(created):
+                return HTMLResponse("Unable to create session", status_code=503)
 
-        token = issue_session_token(settings_obj, user)
+        token = issue_session_token(settings_obj, user, session_id=session_id)
         response = RedirectResponse(next_path, status_code=303)
         response.set_cookie(
             key=_cookie_name(settings_obj),
@@ -816,8 +882,10 @@ a {{ color:#60a5fa; }}
     </table>
   </div>
   <p><a href="/auth/password">Change my password</a></p>
+  <p><a href="/auth/sessions">Manage sessions</a></p>
   <p><a href="{html.escape(home_path)}">Back to app</a></p>
   <p><a href="/auth/users">Manage users</a></p>
+  <p><a href="/auth/audit">Audit log</a></p>
 </div></body></html>"""
         response = HTMLResponse(page)
         _set_csrf_cookie(response, settings_obj, csrf_token)
@@ -946,7 +1014,20 @@ button {{ margin-top:1rem; width:100%; padding:.65rem .8rem; border:0; border-ra
             )
             return HTMLResponse("Invite is invalid, expired, or already used", status_code=400)
 
-        session_token = issue_session_token(settings_obj, user)
+        session_id = secrets.token_urlsafe(32)[:64] if create_session_fn else None
+        expires_at = dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=_ttl_seconds(settings_obj))
+        if create_session_fn and session_id:
+            created = await _invoke_callback(
+                create_session_fn,
+                user.email,
+                session_id,
+                expires_at,
+                request=request,
+            )
+            if not bool(created):
+                return HTMLResponse("Unable to create session", status_code=503)
+
+        session_token = issue_session_token(settings_obj, user, session_id=session_id)
         response = RedirectResponse(home_path, status_code=303)
         response.set_cookie(
             key=_cookie_name(settings_obj),
@@ -1054,7 +1135,9 @@ a {{ color:#60a5fa; }}
     </table>
   </div>
   <p><a href="/auth/password">Change my password</a></p>
+  <p><a href="/auth/sessions">Manage sessions</a></p>
   <p><a href="/auth/invites">Manage invites</a></p>
+  <p><a href="/auth/audit">Audit log</a></p>
   <p><a href="{html.escape(home_path)}">Back to app</a></p>
 </div></body></html>"""
         response = HTMLResponse(page)
@@ -1161,6 +1244,7 @@ a {{ color:#60a5fa; }}
       <label for="confirm_password">Confirm new password</label>
       <input id="confirm_password" name="confirm_password" type="password" required minlength="8" autocomplete="new-password">
       <button type="submit">Update Password</button>
+      <p style="margin:.6rem 0 0 0;"><a href="/auth/sessions">Manage sessions</a></p>
       <p style="margin:.9rem 0 0 0;"><a href="{html.escape(home_path)}">Back to app</a></p>
     </form>
   </div>
@@ -1265,15 +1349,430 @@ a {{ color:#60a5fa; }}
         )
         return RedirectResponse("/auth/password?msg=Password+updated", status_code=303)
 
+    @router.get("/auth/forgot")
+    async def forgot_page(request: Request, msg: str = "", token: str = ""):
+        if not _auth_enabled(settings_obj):
+            return RedirectResponse(home_path, status_code=303)
+        if not request_password_reset_fn:
+            return HTMLResponse("Password reset is not configured", status_code=404)
+
+        csrf_token = _ensure_csrf_token(request, settings_obj)
+        msg_block = ""
+        if msg:
+            msg_block = f"<p style='color:#22c55e;margin:.5rem 0 0 0;'>{html.escape(msg)}</p>"
+        link_block = ""
+        if token:
+            link_block = (
+                "<div style='margin-top:.75rem;padding:.65rem;border:1px solid #1f2937;border-radius:8px;background:#0f172a;'>"
+                "<div style='font-size:.9rem;color:#9ca3af;'>Reset link (local/dev):</div>"
+                f"<a href='/auth/reset?token={quote(token, safe='')}' style='color:#60a5fa;word-break:break-all;'>"
+                f"/auth/reset?token={html.escape(token)}</a></div>"
+            )
+
+        page = f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reset Password</title>
+<style>
+body {{ font-family: system-ui, sans-serif; background:#0b1020; color:#e5e7eb; margin:0; }}
+.wrap {{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:1rem; }}
+.card {{ width:100%; max-width:460px; background:#111827; border:1px solid #1f2937; border-radius:12px; padding:1.25rem; }}
+label {{ display:block; margin:.75rem 0 .25rem 0; font-size:.9rem; }}
+input {{ width:100%; padding:.6rem .7rem; border-radius:8px; border:1px solid #374151; background:#0f172a; color:#f3f4f6; }}
+button {{ margin-top:1rem; width:100%; padding:.65rem .8rem; border:0; border-radius:8px; background:#2563eb; color:#fff; font-weight:600; cursor:pointer; }}
+a {{ color:#60a5fa; }}
+</style></head><body><div class="wrap"><form method="post" class="card">
+<h1 style="margin:0 0 .25rem 0;">Forgot Password</h1>
+<p style="margin:0;color:#9ca3af;">Enter your email and we'll generate a reset link.</p>
+{msg_block}
+{link_block}
+<input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">
+<label for="email">Email</label>
+<input id="email" name="email" type="email" required autocomplete="email">
+<button type="submit">Request reset link</button>
+<p style="margin:.9rem 0 0 0;"><a href="/auth/login">Back to sign in</a></p>
+</form></div></body></html>"""
+        response = HTMLResponse(page)
+        _set_csrf_cookie(response, settings_obj, csrf_token)
+        return response
+
+    @router.post("/auth/forgot")
+    async def forgot_submit(request: Request):
+        if not _auth_enabled(settings_obj):
+            return RedirectResponse(home_path, status_code=303)
+        if not request_password_reset_fn:
+            return HTMLResponse("Password reset is not configured", status_code=404)
+
+        form = await request.form()
+        csrf_token = str(form.get("csrf_token", ""))
+        if not _valid_csrf(request, settings_obj, csrf_token):
+            await _audit(
+                "password_reset_request",
+                "failure",
+                details={"reason": "invalid_csrf"},
+                request=request,
+            )
+            return RedirectResponse("/auth/forgot?msg=Invalid+request", status_code=303)
+
+        email = str(form.get("email", "")).strip().lower()
+        token = await _invoke_callback(
+            request_password_reset_fn,
+            email,
+            request=request,
+        )
+        await _audit(
+            "password_reset_request",
+            "success",
+            target_email=email or None,
+            details={"issued": bool(token)},
+            request=request,
+        )
+        if token:
+            return RedirectResponse(
+                f"/auth/forgot?msg=If+an+account+exists,+a+reset+link+was+generated&token={quote(token, safe='')}",
+                status_code=303,
+            )
+        return RedirectResponse(
+            "/auth/forgot?msg=If+an+account+exists,+a+reset+link+was+generated",
+            status_code=303,
+        )
+
+    @router.get("/auth/reset")
+    async def reset_page(request: Request, token: str = "", msg: str = ""):
+        if not _auth_enabled(settings_obj):
+            return RedirectResponse(home_path, status_code=303)
+        if not reset_password_fn:
+            return HTMLResponse("Password reset is not configured", status_code=404)
+        token_safe = html.escape(token)
+        msg_block = ""
+        if msg:
+            msg_block = f"<p style='color:#f59e0b;margin:.5rem 0 0 0;'>{html.escape(msg)}</p>"
+        csrf_token = _ensure_csrf_token(request, settings_obj)
+        page = f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Set New Password</title>
+<style>
+body {{ font-family: system-ui, sans-serif; background:#0b1020; color:#e5e7eb; margin:0; }}
+.wrap {{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:1rem; }}
+.card {{ width:100%; max-width:460px; background:#111827; border:1px solid #1f2937; border-radius:12px; padding:1.25rem; }}
+label {{ display:block; margin:.75rem 0 .25rem 0; font-size:.9rem; }}
+input {{ width:100%; padding:.6rem .7rem; border-radius:8px; border:1px solid #374151; background:#0f172a; color:#f3f4f6; }}
+button {{ margin-top:1rem; width:100%; padding:.65rem .8rem; border:0; border-radius:8px; background:#2563eb; color:#fff; font-weight:600; cursor:pointer; }}
+a {{ color:#60a5fa; }}
+</style></head><body><div class="wrap"><form method="post" class="card">
+<h1 style="margin:0 0 .25rem 0;">Set New Password</h1>
+<p style="margin:0;color:#9ca3af;">Choose a new password for your account.</p>
+{msg_block}
+<input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">
+<input type="hidden" name="token" value="{token_safe}">
+<label for="new_password">New password</label>
+<input id="new_password" name="new_password" type="password" required minlength="8" autocomplete="new-password">
+<label for="confirm_password">Confirm new password</label>
+<input id="confirm_password" name="confirm_password" type="password" required minlength="8" autocomplete="new-password">
+<button type="submit">Reset password</button>
+<p style="margin:.9rem 0 0 0;"><a href="/auth/login">Back to sign in</a></p>
+</form></div></body></html>"""
+        response = HTMLResponse(page)
+        _set_csrf_cookie(response, settings_obj, csrf_token)
+        return response
+
+    @router.post("/auth/reset")
+    async def reset_submit(request: Request):
+        if not _auth_enabled(settings_obj):
+            return RedirectResponse(home_path, status_code=303)
+        if not reset_password_fn:
+            return HTMLResponse("Password reset is not configured", status_code=404)
+
+        form = await request.form()
+        csrf_token = str(form.get("csrf_token", ""))
+        token = str(form.get("token", "")).strip()
+        new_password = str(form.get("new_password", ""))
+        confirm_password = str(form.get("confirm_password", ""))
+        if not _valid_csrf(request, settings_obj, csrf_token):
+            await _audit(
+                "password_reset_complete",
+                "failure",
+                details={"reason": "invalid_csrf"},
+                request=request,
+            )
+            return RedirectResponse(
+                f"/auth/reset?token={quote(token, safe='')}&msg=Invalid+request",
+                status_code=303,
+            )
+        if len(new_password) < 8:
+            return RedirectResponse(
+                f"/auth/reset?token={quote(token, safe='')}&msg=Password+too+short",
+                status_code=303,
+            )
+        if new_password != confirm_password:
+            return RedirectResponse(
+                f"/auth/reset?token={quote(token, safe='')}&msg=Passwords+do+not+match",
+                status_code=303,
+            )
+
+        user = await _invoke_callback(
+            reset_password_fn,
+            token,
+            new_password,
+            request=request,
+        )
+        if not isinstance(user, AuthUser):
+            await _audit(
+                "password_reset_complete",
+                "failure",
+                details={"reason": "invalid_or_expired_token"},
+                request=request,
+            )
+            return RedirectResponse(
+                f"/auth/reset?token={quote(token, safe='')}&msg=Token+invalid+or+expired",
+                status_code=303,
+            )
+
+        session_id = secrets.token_urlsafe(32)[:64] if create_session_fn else None
+        expires_at = dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=_ttl_seconds(settings_obj))
+        if create_session_fn and session_id:
+            created = await _invoke_callback(
+                create_session_fn,
+                user.email,
+                session_id,
+                expires_at,
+                request=request,
+            )
+            if not bool(created):
+                return HTMLResponse("Unable to create session", status_code=503)
+
+        session_token = issue_session_token(settings_obj, user, session_id=session_id)
+        response = RedirectResponse(home_path, status_code=303)
+        response.set_cookie(
+            key=_cookie_name(settings_obj),
+            value=session_token,
+            max_age=_ttl_seconds(settings_obj),
+            httponly=True,
+            secure=_cookie_secure(settings_obj),
+            samesite="lax",
+            path="/",
+        )
+        _set_csrf_cookie(response, settings_obj, _ensure_csrf_token(request, settings_obj))
+        await _audit(
+            "password_reset_complete",
+            "success",
+            actor_email=user.email,
+            target_email=user.email,
+            request=request,
+        )
+        return response
+
+    @router.get("/auth/sessions")
+    async def sessions_page(request: Request, msg: str = ""):
+        if not _auth_enabled(settings_obj):
+            return RedirectResponse(home_path, status_code=303)
+        if not list_sessions_fn:
+            return HTMLResponse("Session management is not configured", status_code=404)
+
+        user = await _current_user(request)
+        if not user:
+            return RedirectResponse("/auth/login", status_code=303)
+
+        csrf_token = _ensure_csrf_token(request, settings_obj)
+        sessions = await _invoke_callback(list_sessions_fn, user.email, request=request) or []
+        rows_html = []
+        current_sid = user.session_id or ""
+        for sess in sessions:
+            sid = str(sess.get("session_id", ""))
+            created_at = _fmt_dt(sess.get("created_at"))
+            last_seen_at = _fmt_dt(sess.get("last_seen_at"))
+            expires_at = _fmt_dt(sess.get("expires_at"))
+            source_ip = html.escape(str(sess.get("source_ip", "") or "-"))
+            current_badge = " (current)" if sid and sid == current_sid else ""
+            rows_html.append(
+                "<tr>"
+                f"<td style='padding:.4rem;border-top:1px solid #1f2937;'>{html.escape(created_at)}{current_badge}</td>"
+                f"<td style='padding:.4rem;border-top:1px solid #1f2937;'>{html.escape(last_seen_at)}</td>"
+                f"<td style='padding:.4rem;border-top:1px solid #1f2937;'>{html.escape(expires_at)}</td>"
+                f"<td style='padding:.4rem;border-top:1px solid #1f2937;'>{source_ip}</td>"
+                "<td style='padding:.4rem;border-top:1px solid #1f2937;'>"
+                "<form method='post' action='/auth/sessions/revoke'>"
+                f"<input type='hidden' name='csrf_token' value='{html.escape(csrf_token)}'>"
+                f"<input type='hidden' name='session_id' value='{html.escape(sid)}'>"
+                "<button type='submit'>Revoke</button>"
+                "</form>"
+                "</td>"
+                "</tr>"
+            )
+        if not rows_html:
+            rows_html.append(
+                "<tr><td colspan='5' style='padding:.6rem;color:#9ca3af;'>No active sessions</td></tr>"
+            )
+        msg_block = f"<p style='color:#22c55e;'>{html.escape(msg)}</p>" if msg else ""
+        page = f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manage Sessions</title>
+<style>
+body {{ font-family: system-ui, sans-serif; background:#0b1020; color:#e5e7eb; margin:0; }}
+.wrap {{ max-width:960px; margin:1.5rem auto; padding:0 1rem; }}
+.card {{ background:#111827; border:1px solid #1f2937; border-radius:12px; padding:1rem; margin-bottom:1rem; }}
+button {{ padding:.45rem .75rem; border:0; border-radius:8px; background:#2563eb; color:white; font-weight:600; cursor:pointer; }}
+table {{ width:100%; border-collapse:collapse; font-size:.92rem; }}
+a {{ color:#60a5fa; }}
+</style></head><body><div class="wrap">
+  <div class="card">
+    <h1 style="margin:0 0 .25rem 0;">Manage Sessions</h1>
+    <p style="margin:0;color:#9ca3af;">Signed in as {html.escape(user.email)}</p>
+    {msg_block}
+    <form method="post" action="/auth/sessions/revoke-all" style="margin-top:.75rem;">
+      <input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">
+      <button type="submit">Logout all other sessions</button>
+    </form>
+  </div>
+  <div class="card">
+    <table>
+      <thead><tr><th align="left">Created</th><th align="left">Last Seen</th><th align="left">Expires</th><th align="left">IP</th><th align="left"></th></tr></thead>
+      <tbody>{''.join(rows_html)}</tbody>
+    </table>
+  </div>
+  <p><a href="/auth/password">Change password</a></p>
+  <p><a href="{html.escape(home_path)}">Back to app</a></p>
+</div></body></html>"""
+        response = HTMLResponse(page)
+        _set_csrf_cookie(response, settings_obj, csrf_token)
+        return response
+
+    @router.post("/auth/sessions/revoke")
+    async def sessions_revoke(request: Request):
+        if not _auth_enabled(settings_obj):
+            return RedirectResponse(home_path, status_code=303)
+        if not revoke_session_fn:
+            return HTMLResponse("Session revocation is not configured", status_code=404)
+        user = await _current_user(request)
+        if not user:
+            return RedirectResponse("/auth/login", status_code=303)
+        form = await request.form()
+        csrf_token = str(form.get("csrf_token", ""))
+        if not _valid_csrf(request, settings_obj, csrf_token):
+            return RedirectResponse("/auth/sessions?msg=Invalid+request", status_code=303)
+        sid = str(form.get("session_id", "")).strip()
+        revoked = await _invoke_callback(
+            revoke_session_fn,
+            user.email,
+            sid,
+            user.email,
+            request=request,
+        )
+        if sid and user.session_id and sid == user.session_id:
+            response = RedirectResponse("/auth/login", status_code=303)
+            response.delete_cookie(_cookie_name(settings_obj), path="/")
+            response.delete_cookie(_csrf_cookie_name(settings_obj), path="/")
+            return response
+        return RedirectResponse(
+            "/auth/sessions?msg=Session+revoked" if revoked else "/auth/sessions?msg=Session+not+found",
+            status_code=303,
+        )
+
+    @router.post("/auth/sessions/revoke-all")
+    async def sessions_revoke_all(request: Request):
+        if not _auth_enabled(settings_obj):
+            return RedirectResponse(home_path, status_code=303)
+        if not revoke_all_sessions_fn:
+            return HTMLResponse("Session revocation is not configured", status_code=404)
+        user = await _current_user(request)
+        if not user:
+            return RedirectResponse("/auth/login", status_code=303)
+        form = await request.form()
+        csrf_token = str(form.get("csrf_token", ""))
+        if not _valid_csrf(request, settings_obj, csrf_token):
+            return RedirectResponse("/auth/sessions?msg=Invalid+request", status_code=303)
+        await _invoke_callback(
+            revoke_all_sessions_fn,
+            user.email,
+            user.email,
+            user.session_id or "",
+            request=request,
+        )
+        await _audit(
+            "session_revoke_all",
+            "success",
+            actor_email=user.email,
+            target_email=user.email,
+            request=request,
+        )
+        return RedirectResponse("/auth/sessions?msg=Other+sessions+revoked", status_code=303)
+
+    @router.get("/auth/audit")
+    async def audit_page(request: Request, limit: int = 200):
+        if not _auth_enabled(settings_obj):
+            return RedirectResponse(home_path, status_code=303)
+        if not list_audit_events_fn:
+            return HTMLResponse("Audit log is not configured", status_code=404)
+        user = await _current_user(request)
+        if not _can_manage_users(user):
+            return RedirectResponse("/auth/login", status_code=303)
+        rows = await _invoke_callback(list_audit_events_fn, int(max(1, min(limit, 1000))), request=request) or []
+        body_rows = []
+        for row in rows:
+            body_rows.append(
+                "<tr>"
+                f"<td style='padding:.4rem;border-top:1px solid #1f2937;'>{html.escape(_fmt_dt(row.get('created_at')))}</td>"
+                f"<td style='padding:.4rem;border-top:1px solid #1f2937;'>{html.escape(str(row.get('action', '')))}</td>"
+                f"<td style='padding:.4rem;border-top:1px solid #1f2937;'>{html.escape(str(row.get('outcome', '')))}</td>"
+                f"<td style='padding:.4rem;border-top:1px solid #1f2937;'>{html.escape(str(row.get('actor_email', '') or '-'))}</td>"
+                f"<td style='padding:.4rem;border-top:1px solid #1f2937;'>{html.escape(str(row.get('target_email', '') or '-'))}</td>"
+                "</tr>"
+            )
+        if not body_rows:
+            body_rows.append(
+                "<tr><td colspan='5' style='padding:.6rem;color:#9ca3af;'>No audit events</td></tr>"
+            )
+        page = f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auth Audit</title>
+<style>
+body {{ font-family: system-ui, sans-serif; background:#0b1020; color:#e5e7eb; margin:0; }}
+.wrap {{ max-width:1100px; margin:1.5rem auto; padding:0 1rem; }}
+.card {{ background:#111827; border:1px solid #1f2937; border-radius:12px; padding:1rem; margin-bottom:1rem; }}
+table {{ width:100%; border-collapse:collapse; font-size:.92rem; }}
+a {{ color:#60a5fa; }}
+</style></head><body><div class="wrap">
+  <div class="card">
+    <h1 style="margin:0 0 .25rem 0;">Auth Audit</h1>
+    <p style="margin:0;color:#9ca3af;">Recent authentication and account security events.</p>
+  </div>
+  <div class="card">
+    <table>
+      <thead><tr><th align="left">Time</th><th align="left">Action</th><th align="left">Outcome</th><th align="left">Actor</th><th align="left">Target</th></tr></thead>
+      <tbody>{''.join(body_rows)}</tbody>
+    </table>
+  </div>
+  <p><a href="/auth/users">Back to user management</a></p>
+  <p><a href="{html.escape(home_path)}">Back to app</a></p>
+</div></body></html>"""
+        return HTMLResponse(page)
+
     @router.post("/auth/logout")
-    async def logout_post():
+    async def logout_post(request: Request):
+        user = current_user_from_request(request, settings_obj)
+        if revoke_session_fn and user and user.session_id:
+            await _invoke_callback(
+                revoke_session_fn,
+                user.email,
+                user.session_id,
+                user.email,
+                request=request,
+            )
         response = RedirectResponse("/auth/login", status_code=303)
         response.delete_cookie(_cookie_name(settings_obj), path="/")
         response.delete_cookie(_csrf_cookie_name(settings_obj), path="/")
         return response
 
     @router.get("/auth/logout")
-    async def logout_get():
+    async def logout_get(request: Request):
+        user = current_user_from_request(request, settings_obj)
+        if revoke_session_fn and user and user.session_id:
+            await _invoke_callback(
+                revoke_session_fn,
+                user.email,
+                user.session_id,
+                user.email,
+                request=request,
+            )
         response = RedirectResponse("/auth/login", status_code=303)
         response.delete_cookie(_cookie_name(settings_obj), path="/")
         response.delete_cookie(_csrf_cookie_name(settings_obj), path="/")

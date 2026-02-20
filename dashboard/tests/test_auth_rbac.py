@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from sqlalchemy import text
@@ -182,3 +183,125 @@ async def test_dashboard_login_writes_auth_audit_events(client, seeded_db, monke
     action_outcomes = {(row[0], row[1]) for row in rows}
     assert ("login", "failure") in action_outcomes
     assert ("login", "success") in action_outcomes
+
+
+@pytest.mark.asyncio
+async def test_dashboard_revoke_all_other_sessions_invalidates_old_cookie(client, seeded_db, monkeypatch):
+    monkeypatch.setattr(settings, "auth_enabled", True)
+    monkeypatch.setattr(settings, "auth_secret", "dash-test-secret")
+
+    await _insert_account(
+        seeded_db,
+        email="dashsessions@example.com",
+        password="ownerpass123",
+        role="owner",
+    )
+
+    login_one_page = await client.get("/auth/login", params={"next": "/"}, follow_redirects=False)
+    login_one = await client.post(
+        "/auth/login",
+        data={
+            "email": "dashsessions@example.com",
+            "password": "ownerpass123",
+            "next": "/",
+            "csrf_token": _csrf(login_one_page.cookies),
+        },
+        cookies=login_one_page.cookies,
+        follow_redirects=False,
+    )
+    assert login_one.status_code == 303
+
+    login_two = await client.post(
+        "/auth/login",
+        data={
+            "email": "dashsessions@example.com",
+            "password": "ownerpass123",
+            "next": "/",
+            "csrf_token": _csrf(login_one.cookies),
+        },
+        cookies=login_one.cookies,
+        follow_redirects=False,
+    )
+    assert login_two.status_code == 303
+
+    revoke_all = await client.post(
+        "/auth/sessions/revoke-all",
+        data={"csrf_token": _csrf(login_two.cookies)},
+        cookies=login_two.cookies,
+        follow_redirects=False,
+    )
+    assert revoke_all.status_code == 303
+
+    old_home = await client.get("/", cookies=login_one.cookies, follow_redirects=False)
+    assert old_home.status_code == 303
+    assert old_home.headers["location"].startswith("/auth/login")
+
+    current_home = await client.get("/", cookies=login_two.cookies, follow_redirects=False)
+    assert current_home.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_dashboard_password_reset_flow(client, seeded_db, monkeypatch):
+    monkeypatch.setattr(settings, "auth_enabled", True)
+    monkeypatch.setattr(settings, "auth_secret", "dash-test-secret")
+
+    await _insert_account(
+        seeded_db,
+        email="dashreset@example.com",
+        password="ownerpass123",
+        role="owner",
+    )
+
+    forgot_page = await client.get("/auth/forgot", follow_redirects=False)
+    assert forgot_page.status_code == 200
+    forgot_submit = await client.post(
+        "/auth/forgot",
+        data={"email": "dashreset@example.com", "csrf_token": _csrf(forgot_page.cookies)},
+        cookies=forgot_page.cookies,
+        follow_redirects=False,
+    )
+    assert forgot_submit.status_code == 303
+    token = parse_qs(urlparse(forgot_submit.headers["location"]).query).get("token", [""])[0]
+    assert token
+
+    reset_page = await client.get("/auth/reset", params={"token": token}, follow_redirects=False)
+    assert reset_page.status_code == 200
+    reset_submit = await client.post(
+        "/auth/reset",
+        data={
+            "token": token,
+            "new_password": "ownerpass999",
+            "confirm_password": "ownerpass999",
+            "csrf_token": _csrf(reset_page.cookies),
+        },
+        cookies=reset_page.cookies,
+        follow_redirects=False,
+    )
+    assert reset_submit.status_code == 303
+
+    old_login = await client.post(
+        "/auth/login",
+        data={
+            "email": "dashreset@example.com",
+            "password": "ownerpass123",
+            "next": "/",
+            "csrf_token": _csrf(reset_submit.cookies),
+        },
+        cookies=reset_submit.cookies,
+        follow_redirects=False,
+    )
+    assert old_login.status_code == 200
+    assert "Invalid credentials" in old_login.text
+
+    new_login = await client.post(
+        "/auth/login",
+        data={
+            "email": "dashreset@example.com",
+            "password": "ownerpass999",
+            "next": "/",
+            "csrf_token": _csrf(reset_submit.cookies),
+        },
+        cookies=reset_submit.cookies,
+        follow_redirects=False,
+    )
+    assert new_login.status_code == 303

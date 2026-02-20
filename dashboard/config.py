@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings
 
 
 class DashboardSettings(BaseSettings):
+    environment: str = "development"
     crm_database_url: str = "sqlite+aiosqlite:///crm.db"
     wf_database_url: str = "sqlite+aiosqlite:///workflows.db"
     hiring_database_url: str = "sqlite:///hiring.db"
@@ -23,6 +24,7 @@ class DashboardSettings(BaseSettings):
     auth_bootstrap_email: str = "admin@example.com"
     auth_bootstrap_password: str = ""
     auth_bootstrap_role: str = "owner"
+    security_fail_closed: bool = False
     dashboard_url: str = "http://localhost:8023"
     crm_url: str = "http://localhost:8020"
     hiring_url: str = "http://localhost:8021"
@@ -50,6 +52,10 @@ class DashboardSettings(BaseSettings):
             "hiring": self.hiring_url,
             "workflows": self.workflows_url,
         }
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment.strip().lower() in {"prod", "production"}
 
 
 settings = DashboardSettings()

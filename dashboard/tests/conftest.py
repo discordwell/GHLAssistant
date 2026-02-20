@@ -79,6 +79,33 @@ class CRMAuthEvent(CRMBase):
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
+class CRMAuthSession(CRMBase):
+    __tablename__ = "auth_session"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    session_id = Column(String, unique=True, index=True, nullable=False)
+    email = Column(String, index=True, nullable=False)
+    source_ip = Column(String)
+    user_agent = Column(String)
+    expires_at = Column(DateTime, nullable=False)
+    last_seen_at = Column(DateTime, default=datetime.utcnow, index=True)
+    revoked_at = Column(DateTime, index=True)
+    revoked_reason = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class CRMAuthPasswordReset(CRMBase):
+    __tablename__ = "auth_password_reset"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    email = Column(String, index=True, nullable=False)
+    token_hash = Column(String, unique=True, index=True, nullable=False)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    used_at = Column(DateTime, index=True)
+    source_ip = Column(String)
+    user_agent = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+
 # --- Workflows schema (minimal reproduction) ---
 
 class WFBase(DeclarativeBase):
