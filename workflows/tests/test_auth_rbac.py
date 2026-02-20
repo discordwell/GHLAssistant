@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import parse_qs, urlparse
+
 import pytest
 from httpx import AsyncClient
 
@@ -49,3 +51,46 @@ async def test_viewer_role_cannot_write(
     )
     assert resp.status_code == 403
 
+
+@pytest.mark.asyncio
+async def test_invite_flow_creates_persistent_user(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(settings, "auth_enabled", True)
+    monkeypatch.setattr(settings, "auth_secret", "test-secret")
+    monkeypatch.setattr(settings, "auth_bootstrap_email", "owner@example.com")
+    monkeypatch.setattr(settings, "auth_bootstrap_password", "ownerpass123")
+    monkeypatch.setattr(settings, "auth_bootstrap_role", "owner")
+
+    owner_login = await client.post(
+        "/auth/login",
+        data={"email": "owner@example.com", "password": "ownerpass123", "next": "/"},
+        follow_redirects=False,
+    )
+    assert owner_login.status_code == 303
+
+    invite_resp = await client.post(
+        "/auth/invites",
+        data={"email": "newuser@example.com", "role": "manager"},
+        cookies=owner_login.cookies,
+        follow_redirects=False,
+    )
+    assert invite_resp.status_code == 303
+    qs = parse_qs(urlparse(invite_resp.headers["location"]).query)
+    token = qs.get("token", [""])[0]
+    assert token
+
+    accept_resp = await client.post(
+        "/auth/accept",
+        data={"token": token, "password": "newuserpass123"},
+        follow_redirects=False,
+    )
+    assert accept_resp.status_code == 303
+
+    new_login = await client.post(
+        "/auth/login",
+        data={"email": "newuser@example.com", "password": "newuserpass123", "next": "/"},
+        follow_redirects=False,
+    )
+    assert new_login.status_code == 303

@@ -95,6 +95,9 @@ Services:
 - `DASH_AUTH_ENABLED=true`: enable session auth + RBAC middleware
 
 Auth bootstrap credentials are currently environment-driven (`*_AUTH_BOOTSTRAP_*`) as a skeleton; replace with a real user store/IdP before GA.
+Persistent accounts/invites are now DB-backed:
+- Admin invite UI: `/auth/invites`
+- Invite accept flow: `/auth/accept?token=...`
 
 ## Health/Readiness Endpoints
 

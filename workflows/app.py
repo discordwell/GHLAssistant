@@ -39,6 +39,8 @@ app.add_middleware(
         "/static/",
         "/auth/login",
         "/auth/logout",
+        "/auth/invites",
+        "/auth/accept",
         "/webhooks/",
     ),
 )
@@ -58,6 +60,7 @@ from .routers import (  # noqa: E402
     webhooks,
     workflows,
 )
+from .services import auth_svc  # noqa: E402
 
 app.include_router(dashboard.router)
 app.include_router(workflows.router)
@@ -67,4 +70,14 @@ app.include_router(api.router)
 app.include_router(chat.router)
 app.include_router(webhooks.router)
 app.include_router(health.router)
-app.include_router(build_auth_router(settings, home_path="/"))
+app.include_router(
+    build_auth_router(
+        settings,
+        service_name="workflows",
+        home_path="/",
+        authenticate_fn=auth_svc.authenticate_user,
+        list_invites_fn=auth_svc.list_invites,
+        create_invite_fn=auth_svc.create_invite,
+        accept_invite_fn=auth_svc.accept_invite,
+    )
+)
