@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from maxlevel.platform_auth import (
@@ -167,6 +167,85 @@ async def list_invites(limit: int = 100, request: Request | None = None) -> list
             }
         )
     return rows
+
+
+async def list_accounts(limit: int = 200, request: Request | None = None) -> list[dict]:
+    async with _db_session(request) as db:
+        accounts = list(
+            (
+                await db.execute(
+                    select(AuthAccount).order_by(AuthAccount.created_at.desc()).limit(limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    rows = []
+    for account in accounts:
+        rows.append(
+            {
+                "email": account.email,
+                "role": account.role,
+                "is_active": account.is_active,
+                "last_login_at": _as_utc(account.last_login_at),
+                "created_at": _as_utc(account.created_at),
+            }
+        )
+    return rows
+
+
+async def _active_owner_count_excluding(
+    db: AsyncSession,
+    email_exclude: str,
+) -> int:
+    return int(
+        (
+            await db.execute(
+                select(func.count(AuthAccount.id)).where(
+                    AuthAccount.role == "owner",
+                    AuthAccount.is_active.is_(True),
+                    AuthAccount.email != email_exclude,
+                )
+            )
+        ).scalar_one()
+        or 0
+    )
+
+
+async def update_account(
+    email: str,
+    role: str,
+    is_active: bool,
+    actor_email: str | None,
+    request: Request | None = None,
+) -> bool:
+    email_norm = _normalize_email(email)
+    actor_norm = _normalize_email(actor_email or "")
+    if not email_norm:
+        return False
+
+    async with _db_session(request) as db:
+        account = (
+            await db.execute(select(AuthAccount).where(AuthAccount.email == email_norm))
+        ).scalar_one_or_none()
+        if not account:
+            return False
+
+        next_role = _normalize_role(role)
+        if actor_norm and actor_norm == email_norm and not is_active:
+            return False
+
+        current_role = _normalize_role(account.role)
+        removing_owner = current_role == "owner" and (next_role != "owner" or not is_active)
+        if removing_owner:
+            if await _active_owner_count_excluding(db, email_norm) < 1:
+                return False
+
+        account.role = next_role
+        account.is_active = bool(is_active)
+        await db.commit()
+        return True
 
 
 async def create_invite(

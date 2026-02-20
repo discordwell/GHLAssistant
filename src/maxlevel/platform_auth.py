@@ -314,6 +314,8 @@ def build_auth_router(
     list_invites_fn=None,
     create_invite_fn=None,
     accept_invite_fn=None,
+    list_accounts_fn=None,
+    update_account_fn=None,
 ) -> APIRouter:
     """Construct login/logout routes for a service app."""
     router = APIRouter(tags=["auth"])
@@ -520,6 +522,7 @@ a {{ color:#60a5fa; }}
     </table>
   </div>
   <p><a href="{html.escape(home_path)}">Back to app</a></p>
+  <p><a href="/auth/users">Manage users</a></p>
 </div></body></html>"""
         return HTMLResponse(page)
 
@@ -607,6 +610,125 @@ button {{ margin-top:1rem; width:100%; padding:.65rem .8rem; border:0; border-ra
             path="/",
         )
         return response
+
+    @router.get("/auth/users")
+    async def users_page(request: Request, msg: str = ""):
+        if not _auth_enabled(settings_obj):
+            return RedirectResponse(home_path, status_code=303)
+        if not list_accounts_fn or not update_account_fn:
+            return HTMLResponse("User management is not configured", status_code=404)
+
+        user = current_user_from_request(request, settings_obj)
+        if not _can_manage_users(user):
+            return RedirectResponse("/auth/login", status_code=303)
+
+        accounts = await _invoke_callback(list_accounts_fn, request=request)
+        rows_html = []
+        for account in accounts or []:
+            email = str(account.get("email", "")).strip().lower()
+            role = _normalize_role(str(account.get("role", "viewer")))
+            is_active = bool(account.get("is_active", False))
+            last_login_at = _fmt_dt(account.get("last_login_at"))
+            created_at = _fmt_dt(account.get("created_at"))
+            email_safe = html.escape(email)
+            role_options = "".join(
+                (
+                    f"<option value='{role_name}'{' selected' if role_name == role else ''}>"
+                    f"{role_name}</option>"
+                )
+                for role_name in ROLE_ORDER
+            )
+            status_options = (
+                "<option value='true' selected>active</option>"
+                "<option value='false'>disabled</option>"
+                if is_active
+                else "<option value='true'>active</option>"
+                "<option value='false' selected>disabled</option>"
+            )
+            rows_html.append(
+                "<tr>"
+                f"<td style='padding:.4rem;border-top:1px solid #1f2937;'>{email_safe}</td>"
+                "<td style='padding:.4rem;border-top:1px solid #1f2937;'>"
+                "<form method='post' action='/auth/users' style='display:flex;gap:.5rem;align-items:center;'>"
+                f"<input type='hidden' name='email' value='{email_safe}'>"
+                f"<select name='role' style='min-width:110px;'>{role_options}</select>"
+                f"<select name='is_active' style='min-width:110px;'>{status_options}</select>"
+                "<button type='submit'>Save</button>"
+                "</form>"
+                "</td>"
+                f"<td style='padding:.4rem;border-top:1px solid #1f2937;'>{html.escape(last_login_at)}</td>"
+                f"<td style='padding:.4rem;border-top:1px solid #1f2937;'>{html.escape(created_at)}</td>"
+                "</tr>"
+            )
+        table_body = "".join(rows_html) or (
+            "<tr><td colspan='4' style='padding:.6rem;color:#9ca3af;'>No users found</td></tr>"
+        )
+
+        msg_block = ""
+        if msg:
+            color = "#22c55e" if "updated" in msg.lower() else "#f59e0b"
+            msg_block = f"<p style='color:{color};margin:.5rem 0 0 0;'>{html.escape(msg)}</p>"
+
+        page = f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manage Users</title>
+<style>
+body {{ font-family: system-ui, sans-serif; background:#0b1020; color:#e5e7eb; margin:0; }}
+.wrap {{ max-width:960px; margin:1.5rem auto; padding:0 1rem; }}
+.card {{ background:#111827; border:1px solid #1f2937; border-radius:12px; padding:1rem; margin-bottom:1rem; }}
+select {{ width:100%; padding:.45rem .6rem; border-radius:8px; border:1px solid #374151; background:#0f172a; color:#f3f4f6; }}
+button {{ padding:.45rem .75rem; border:0; border-radius:8px; background:#2563eb; color:white; font-weight:600; cursor:pointer; }}
+table {{ width:100%; border-collapse:collapse; font-size:.92rem; }}
+a {{ color:#60a5fa; }}
+</style></head><body>
+<div class="wrap">
+  <div class="card">
+    <h1 style="margin:0 0 .25rem 0;">Manage Users</h1>
+    <p style="margin:0;color:#9ca3af;">Update roles and account status.</p>
+    {msg_block}
+  </div>
+  <div class="card">
+    <table>
+      <thead>
+        <tr><th align="left">Email</th><th align="left">Role / Status</th><th align="left">Last Login</th><th align="left">Created</th></tr>
+      </thead>
+      <tbody>{table_body}</tbody>
+    </table>
+  </div>
+  <p><a href="/auth/invites">Manage invites</a></p>
+  <p><a href="{html.escape(home_path)}">Back to app</a></p>
+</div></body></html>"""
+        return HTMLResponse(page)
+
+    @router.post("/auth/users")
+    async def users_update(request: Request):
+        if not _auth_enabled(settings_obj):
+            return RedirectResponse(home_path, status_code=303)
+        if not update_account_fn:
+            return HTMLResponse("User management is not configured", status_code=404)
+
+        user = current_user_from_request(request, settings_obj)
+        if not _can_manage_users(user):
+            return RedirectResponse("/auth/login", status_code=303)
+
+        form = await request.form()
+        email = str(form.get("email", "")).strip().lower()
+        role = _normalize_role(str(form.get("role", "viewer")))
+        is_active_raw = str(form.get("is_active", "true")).strip().lower()
+        is_active = is_active_raw in {"1", "true", "yes", "on", "active"}
+        if not email:
+            return RedirectResponse("/auth/users?msg=Email+required", status_code=303)
+
+        updated = await _invoke_callback(
+            update_account_fn,
+            email,
+            role,
+            is_active,
+            user.email,
+            request=request,
+        )
+        msg = "User+updated" if updated else "Update+rejected"
+        return RedirectResponse(f"/auth/users?msg={msg}", status_code=303)
 
     @router.post("/auth/logout")
     async def logout_post():
