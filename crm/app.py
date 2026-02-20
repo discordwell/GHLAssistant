@@ -11,6 +11,7 @@ from fastapi.templating import Jinja2Templates
 from maxlevel.platform_auth import RBACMiddleware, build_auth_router
 
 from .config import settings
+from .services import auth_svc
 from .tenant.middleware import TenantMiddleware
 
 
@@ -32,6 +33,7 @@ app.add_middleware(
     RBACMiddleware,
     settings_obj=settings,
     service_name="crm",
+    resolve_user_fn=auth_svc.resolve_user,
     exempt_prefixes=(
         "/health",
         "/ready",
@@ -40,6 +42,7 @@ app.add_middleware(
         "/auth/logout",
         "/auth/invites",
         "/auth/users",
+        "/auth/password",
         "/auth/accept",
         "/webhooks/",
         "/f/",
@@ -55,7 +58,6 @@ from .routers import (  # noqa: E402
     locations, dashboard, contacts, pipelines, tags, custom_fields, tasks, sync,
     conversations, calendars, forms, surveys, campaigns, funnels, health, webhooks,
 )
-from .services import auth_svc  # noqa: E402
 
 app.include_router(locations.router)
 app.include_router(dashboard.router)
@@ -79,11 +81,13 @@ app.include_router(
         service_name="crm",
         home_path="/locations/",
         allow_bootstrap_fallback=False,
+        resolve_user_fn=auth_svc.resolve_user,
         authenticate_fn=auth_svc.authenticate_user,
         list_invites_fn=auth_svc.list_invites,
         create_invite_fn=auth_svc.create_invite,
         accept_invite_fn=auth_svc.accept_invite,
         list_accounts_fn=auth_svc.list_accounts,
         update_account_fn=auth_svc.update_account,
+        change_password_fn=auth_svc.change_password,
     )
 )

@@ -137,6 +137,20 @@ async def authenticate_user(
         return AuthUser(email=account.email, role=account.role)
 
 
+async def resolve_user(email: str, request: Request | None = None) -> AuthUser | None:
+    email_norm = _normalize_email(email)
+    if not email_norm:
+        return None
+
+    async with _db_session(request) as db:
+        account = (
+            await db.execute(select(AuthAccount).where(AuthAccount.email == email_norm))
+        ).scalar_one_or_none()
+        if not account or not account.is_active:
+            return None
+        return AuthUser(email=account.email, role=_normalize_role(account.role))
+
+
 async def list_invites(limit: int = 100, request: Request | None = None) -> list[dict]:
     """List invite records for admin UI."""
     async with _db_session(request) as db:
@@ -264,6 +278,30 @@ async def update_account(
 
         account.role = next_role
         account.is_active = bool(is_active)
+        await db.commit()
+        return True
+
+
+async def change_password(
+    email: str,
+    current_password: str,
+    new_password: str,
+    request: Request | None = None,
+) -> bool:
+    email_norm = _normalize_email(email)
+    if not email_norm or len(new_password or "") < 8:
+        return False
+
+    async with _db_session(request) as db:
+        account = (
+            await db.execute(select(AuthAccount).where(AuthAccount.email == email_norm))
+        ).scalar_one_or_none()
+        if not account or not account.is_active:
+            return False
+        if not verify_password(current_password or "", account.password_hash):
+            return False
+
+        account.password_hash = hash_password(new_password)
         await db.commit()
         return True
 

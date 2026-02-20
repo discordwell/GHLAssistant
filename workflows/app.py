@@ -11,6 +11,7 @@ from fastapi.templating import Jinja2Templates
 from maxlevel.platform_auth import RBACMiddleware, build_auth_router
 
 from .config import settings
+from .services import auth_svc
 from .worker import dispatch_worker
 
 
@@ -33,6 +34,7 @@ app.add_middleware(
     RBACMiddleware,
     settings_obj=settings,
     service_name="workflows",
+    resolve_user_fn=auth_svc.resolve_user,
     exempt_prefixes=(
         "/health",
         "/ready",
@@ -41,6 +43,7 @@ app.add_middleware(
         "/auth/logout",
         "/auth/invites",
         "/auth/users",
+        "/auth/password",
         "/auth/accept",
         "/webhooks/",
     ),
@@ -61,7 +64,6 @@ from .routers import (  # noqa: E402
     webhooks,
     workflows,
 )
-from .services import auth_svc  # noqa: E402
 
 app.include_router(dashboard.router)
 app.include_router(workflows.router)
@@ -77,11 +79,13 @@ app.include_router(
         service_name="workflows",
         home_path="/",
         allow_bootstrap_fallback=False,
+        resolve_user_fn=auth_svc.resolve_user,
         authenticate_fn=auth_svc.authenticate_user,
         list_invites_fn=auth_svc.list_invites,
         create_invite_fn=auth_svc.create_invite,
         accept_invite_fn=auth_svc.accept_invite,
         list_accounts_fn=auth_svc.list_accounts,
         update_account_fn=auth_svc.update_account,
+        change_password_fn=auth_svc.change_password,
     )
 )

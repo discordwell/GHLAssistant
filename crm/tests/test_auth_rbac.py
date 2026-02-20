@@ -255,3 +255,197 @@ async def test_manager_cannot_modify_owner_or_self_escalate(
         follow_redirects=False,
     )
     assert owner_relogin.status_code == 303
+
+
+@pytest.mark.asyncio
+async def test_password_change_rotates_credentials(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(settings, "auth_enabled", True)
+    monkeypatch.setattr(settings, "auth_secret", "test-secret")
+    monkeypatch.setattr(settings, "auth_bootstrap_email", "owner@example.com")
+    monkeypatch.setattr(settings, "auth_bootstrap_password", "ownerpass123")
+    monkeypatch.setattr(settings, "auth_bootstrap_role", "owner")
+
+    owner_login = await client.post(
+        "/auth/login",
+        data={"email": "owner@example.com", "password": "ownerpass123", "next": "/locations/"},
+        follow_redirects=False,
+    )
+    assert owner_login.status_code == 303
+
+    changed = await client.post(
+        "/auth/password",
+        data={
+            "current_password": "ownerpass123",
+            "new_password": "ownerpass456",
+            "confirm_password": "ownerpass456",
+        },
+        cookies=owner_login.cookies,
+        follow_redirects=False,
+    )
+    assert changed.status_code == 303
+    assert changed.headers["location"].startswith("/auth/password?msg=Password+updated")
+
+    old_login = await client.post(
+        "/auth/login",
+        data={"email": "owner@example.com", "password": "ownerpass123", "next": "/locations/"},
+        follow_redirects=False,
+    )
+    assert old_login.status_code == 200
+    assert "Invalid credentials" in old_login.text
+
+    new_login = await client.post(
+        "/auth/login",
+        data={"email": "owner@example.com", "password": "ownerpass456", "next": "/locations/"},
+        follow_redirects=False,
+    )
+    assert new_login.status_code == 303
+
+
+@pytest.mark.asyncio
+async def test_password_change_rejects_wrong_current_password(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(settings, "auth_enabled", True)
+    monkeypatch.setattr(settings, "auth_secret", "test-secret")
+    monkeypatch.setattr(settings, "auth_bootstrap_email", "owner@example.com")
+    monkeypatch.setattr(settings, "auth_bootstrap_password", "ownerpass123")
+    monkeypatch.setattr(settings, "auth_bootstrap_role", "owner")
+
+    owner_login = await client.post(
+        "/auth/login",
+        data={"email": "owner@example.com", "password": "ownerpass123", "next": "/locations/"},
+        follow_redirects=False,
+    )
+    assert owner_login.status_code == 303
+
+    rejected = await client.post(
+        "/auth/password",
+        data={
+            "current_password": "wrongpass",
+            "new_password": "ownerpass456",
+            "confirm_password": "ownerpass456",
+        },
+        cookies=owner_login.cookies,
+        follow_redirects=False,
+    )
+    assert rejected.status_code == 303
+    assert rejected.headers["location"].startswith("/auth/password?msg=Current+password+invalid")
+
+
+@pytest.mark.asyncio
+async def test_disabled_user_active_session_is_revoked_immediately(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(settings, "auth_enabled", True)
+    monkeypatch.setattr(settings, "auth_secret", "test-secret")
+    monkeypatch.setattr(settings, "auth_bootstrap_email", "owner@example.com")
+    monkeypatch.setattr(settings, "auth_bootstrap_password", "ownerpass123")
+    monkeypatch.setattr(settings, "auth_bootstrap_role", "owner")
+
+    owner_login = await client.post(
+        "/auth/login",
+        data={"email": "owner@example.com", "password": "ownerpass123", "next": "/locations/"},
+        follow_redirects=False,
+    )
+    assert owner_login.status_code == 303
+
+    invite_resp = await client.post(
+        "/auth/invites",
+        data={"email": "agent@example.com", "role": "manager"},
+        cookies=owner_login.cookies,
+        follow_redirects=False,
+    )
+    token = parse_qs(urlparse(invite_resp.headers["location"]).query).get("token", [""])[0]
+    assert token
+
+    accept_resp = await client.post(
+        "/auth/accept",
+        data={"token": token, "password": "agentpass123"},
+        follow_redirects=False,
+    )
+    assert accept_resp.status_code == 303
+
+    agent_login = await client.post(
+        "/auth/login",
+        data={"email": "agent@example.com", "password": "agentpass123", "next": "/locations/"},
+        follow_redirects=False,
+    )
+    assert agent_login.status_code == 303
+
+    disable_agent = await client.post(
+        "/auth/users",
+        data={"email": "agent@example.com", "role": "manager", "is_active": "false"},
+        cookies=owner_login.cookies,
+        follow_redirects=False,
+    )
+    assert disable_agent.status_code == 303
+    assert disable_agent.headers["location"].startswith("/auth/users?msg=User+updated")
+
+    revoked_access = await client.get("/", cookies=agent_login.cookies, follow_redirects=False)
+    assert revoked_access.status_code == 303
+    assert revoked_access.headers["location"].startswith("/auth/login")
+
+
+@pytest.mark.asyncio
+async def test_demotion_applies_to_auth_routes_without_relogin(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(settings, "auth_enabled", True)
+    monkeypatch.setattr(settings, "auth_secret", "test-secret")
+    monkeypatch.setattr(settings, "auth_bootstrap_email", "owner@example.com")
+    monkeypatch.setattr(settings, "auth_bootstrap_password", "ownerpass123")
+    monkeypatch.setattr(settings, "auth_bootstrap_role", "owner")
+
+    owner_login = await client.post(
+        "/auth/login",
+        data={"email": "owner@example.com", "password": "ownerpass123", "next": "/locations/"},
+        follow_redirects=False,
+    )
+    assert owner_login.status_code == 303
+
+    invite_resp = await client.post(
+        "/auth/invites",
+        data={"email": "manager2@example.com", "role": "manager"},
+        cookies=owner_login.cookies,
+        follow_redirects=False,
+    )
+    token = parse_qs(urlparse(invite_resp.headers["location"]).query).get("token", [""])[0]
+    assert token
+
+    accept_resp = await client.post(
+        "/auth/accept",
+        data={"token": token, "password": "manager2pass123"},
+        follow_redirects=False,
+    )
+    assert accept_resp.status_code == 303
+
+    manager_login = await client.post(
+        "/auth/login",
+        data={"email": "manager2@example.com", "password": "manager2pass123", "next": "/locations/"},
+        follow_redirects=False,
+    )
+    assert manager_login.status_code == 303
+
+    demote_manager = await client.post(
+        "/auth/users",
+        data={"email": "manager2@example.com", "role": "viewer", "is_active": "true"},
+        cookies=owner_login.cookies,
+        follow_redirects=False,
+    )
+    assert demote_manager.status_code == 303
+    assert demote_manager.headers["location"].startswith("/auth/users?msg=User+updated")
+
+    manager_invite_attempt = await client.post(
+        "/auth/invites",
+        data={"email": "shouldfail@example.com", "role": "viewer"},
+        cookies=manager_login.cookies,
+        follow_redirects=False,
+    )
+    assert manager_invite_attempt.status_code == 303
+    assert manager_invite_attempt.headers["location"].startswith("/auth/login")
