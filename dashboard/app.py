@@ -8,6 +8,8 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from maxlevel.platform_auth import RBACMiddleware, build_auth_router
+
 from .config import settings
 from .database import multi_db
 
@@ -20,6 +22,18 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=settings.app_title, lifespan=lifespan)
 
+app.add_middleware(
+    RBACMiddleware,
+    settings_obj=settings,
+    service_name="dashboard",
+    exempt_prefixes=(
+        "/health",
+        "/ready",
+        "/static/",
+        "/auth/login",
+        "/auth/logout",
+    ),
+)
 app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="dash_static")
 
 templates = Jinja2Templates(directory=str(settings.templates_dir))
@@ -30,3 +44,4 @@ from .routers import home, health  # noqa: E402
 
 app.include_router(home.router)
 app.include_router(health.router)
+app.include_router(build_auth_router(settings, home_path="/"))

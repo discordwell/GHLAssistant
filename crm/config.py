@@ -12,6 +12,14 @@ class CRMSettings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///crm.db"
     echo_sql: bool = False
     app_title: str = "CRM Platform"
+    auth_enabled: bool = False
+    auth_secret: str = ""
+    auth_cookie_name: str = "ml_crm_session"
+    auth_cookie_secure: bool = False
+    auth_session_ttl_seconds: int = 86400
+    auth_bootstrap_email: str = "admin@example.com"
+    auth_bootstrap_password: str = ""
+    auth_bootstrap_role: str = "owner"
     security_fail_closed: bool = False
     tenant_auth_required: bool = False
     tenant_access_tokens: str = ""

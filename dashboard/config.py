@@ -12,6 +12,14 @@ class DashboardSettings(BaseSettings):
     wf_database_url: str = "sqlite+aiosqlite:///workflows.db"
     hiring_database_url: str = "sqlite:///hiring.db"
     app_title: str = "MaxLevel Dashboard"
+    auth_enabled: bool = False
+    auth_secret: str = ""
+    auth_cookie_name: str = "ml_dash_session"
+    auth_cookie_secure: bool = False
+    auth_session_ttl_seconds: int = 86400
+    auth_bootstrap_email: str = "admin@example.com"
+    auth_bootstrap_password: str = ""
+    auth_bootstrap_role: str = "owner"
     dashboard_url: str = "http://localhost:8023"
     crm_url: str = "http://localhost:8020"
     hiring_url: str = "http://localhost:8021"

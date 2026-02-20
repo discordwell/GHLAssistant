@@ -8,6 +8,8 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from maxlevel.platform_auth import RBACMiddleware, build_auth_router
+
 from .config import settings
 from .tenant.middleware import TenantMiddleware
 
@@ -26,6 +28,20 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title=settings.app_title, lifespan=lifespan)
 
 app.add_middleware(TenantMiddleware)
+app.add_middleware(
+    RBACMiddleware,
+    settings_obj=settings,
+    service_name="crm",
+    exempt_prefixes=(
+        "/health",
+        "/ready",
+        "/static/",
+        "/auth/login",
+        "/auth/logout",
+        "/webhooks/",
+        "/f/",
+    ),
+)
 app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="static")
 
 templates = Jinja2Templates(directory=str(settings.templates_dir))
@@ -53,3 +69,4 @@ app.include_router(campaigns.router)
 app.include_router(funnels.router)
 app.include_router(webhooks.router)
 app.include_router(health.router)
+app.include_router(build_auth_router(settings, home_path="/locations/"))
